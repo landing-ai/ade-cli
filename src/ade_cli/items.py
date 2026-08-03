@@ -305,6 +305,22 @@ def compact_params(record: dict) -> str:
     return " · ".join(parts)
 
 
+def elided_params(record: dict) -> str:
+    """``compact_params`` with the elidable middle squeezed out: the model
+    and the tier must stay visible wherever params render, so a parse
+    cell that cannot fit whole drops its pages list to a ``…`` marker.
+    Extract summaries are already bounded and pass through unchanged."""
+    params = record.get("params") or {}
+    if record["kind"] != "parse":
+        return compact_params(record)
+    parts = [params.get("model") or "?"]
+    if (params.get("options") or {}).get("pages"):
+        parts.append("…")
+    if params.get("tier"):
+        parts.append(params["tier"])
+    return " · ".join(parts)
+
+
 def source_name(source: str | None) -> str | None:
     """How listings and the sidebar name a source: the file name for paths,
     the whole string for URLs (Path() would mangle them)."""

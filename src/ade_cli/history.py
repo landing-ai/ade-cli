@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import os
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime
 
 import typer
 
 from . import historyjs, items, store
 from .config import ade_home
-from .output import EXIT_FAILED, EXIT_USAGE, JSON_FLAG, emit, tilde, timestamp
+from .output import EXIT_FAILED, EXIT_USAGE, JSON_FLAG, emit, tilde
 from .ports import Ports
 
 history_app = typer.Typer(name="history", help="Inspect and manage the local job-item store.")
@@ -120,9 +120,8 @@ def _plain_line(record: dict, indent: bool) -> str:
         # environment field read as "?", never a guessed default.
         + f"{record['state']:<10}  {record.get('environment') or '?':<10}  "
         # When the run was submitted — the ordering key, so the listing's
-        # oldest-first order is legible. 20 wide fits both the timestamp
-        # form and the "unknown" of items predating the field.
-        + f"{timestamp(record.get('submitted_at')):<20}  "
+        # oldest-first order is legible. Local time, like the table.
+        + f"{_submitted_cell(record):<16}  "
         + f"{items.compact_params(record)}  "
         + (record["source"] or "?")
     )
@@ -175,23 +174,35 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
         ]
         for record, indent in rows
     ]
-    headers = ["JOB ITEM", "KIND", "STATE", "ENV", "SUBMITTED (UTC)", "PARAMS"]
+    zone = _zone_label()
+    headers = [
+        "JOB ITEM",
+        "KIND",
+        "STATE",
+        "ENV",
+        f"SUBMITTED ({zone})" if zone else "SUBMITTED",
+        "PARAMS",
+    ]
     widths = [
         max(len(header), *(len(row[i]) for row in cells))
         for i, header in enumerate(headers)
     ]
+    # What a truncated params cell must keep visible: the model and the
+    # tier — only the middle (a pages list) may elide.
+    elided = [items.elided_params(record) for record, _ in rows]
+    keep = max(len("PARAMS"), *(len(text) for text in elided))
     # SUBMITTED is the first column to yield: on a terminal too narrow to
-    # hold it alongside the PARAMS and SOURCE floors it drops entirely —
-    # a partial timestamp is noise, and the exact epoch lives in --json.
-    if console.width < sum(widths[:5]) + 12 + 8 + _overhead(len(headers)):
+    # hold it alongside the un-elidable params and the SOURCE floor it
+    # drops entirely — a partial timestamp is noise, and the exact epoch
+    # lives in --json.
+    if console.width < sum(widths[:5]) + min(keep, 40) + 8 + _overhead(len(headers)):
         headers.pop(4)
         widths.pop(4)
         cells = [row[:4] + row[5:] for row in cells]
     # The identity columns (id, kind, state, env, submitted) are naturally
     # narrow and fix at content width so rich never shrinks them. PARAMS
     # takes what the terminal leaves after those plus a floor for SOURCE —
-    # and wraps inside its own cell when longer, so no column ever pushes
-    # another off-screen.
+    # so no column ever pushes another off-screen.
     last = len(headers) - 1  # PARAMS
     overhead = _overhead(len(headers))
     widths[last] = min(
@@ -199,6 +210,12 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
         40,  # a params cell is a summary; past this, SOURCE needs it more
         max(12, console.width - sum(widths[:last]) - overhead - 12),
     )
+    # A cell that overflows the column swaps to its elided form (model and
+    # tier intact) when that fits; folding below remains only for a
+    # terminal too narrow even for the elided form.
+    for row, short in zip(cells, elided):
+        if len(row[last]) > widths[last] >= len(short):
+            row[last] = short
     table = Table(box=box.SIMPLE, show_edge=False, pad_edge=False, header_style="bold")
     for header, width_ in zip(headers[:last], widths[:last]):
         # width alone is advisory under overflow; min_width pins it so a
@@ -260,12 +277,27 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
 
 
 def _submitted_cell(record: dict) -> str:
-    """The table's compact submission time: UTC to the minute (the header
-    names the zone once). Items predating the field read as "?"."""
+    """The compact submission time, in this machine's local zone (the
+    table header names the zone once) — listings are read where the runs
+    happened. Items predating the field read as "?"; the raw epoch stays
+    in --json (``submitted_at``)."""
     epoch = record.get("submitted_at")
     if epoch is None:
         return "?"
-    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M")
+
+
+def _zone_label() -> str:
+    """The local zone for the table header: the platform's abbreviation
+    ("PST", "CEST") when it has a short one, the numeric offset
+    ("+08:00") when the name is missing or long (Windows spells out
+    localized full names), empty only if both fail."""
+    now = datetime.now().astimezone()
+    name = now.strftime("%Z")
+    if name and len(name) <= 5:
+        return name
+    offset = now.strftime("%z")
+    return f"{offset[:3]}:{offset[3:]}" if offset else ""
 
 
 def _overhead(columns: int) -> int:

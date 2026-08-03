@@ -9,6 +9,7 @@ goes stale.
 """
 
 import json
+from datetime import datetime
 
 import pytest
 
@@ -215,31 +216,54 @@ def test_history_table_keeps_every_column_inside_the_terminal(
     assert "production" in result.stdout
     # SUBMITTED rides where the terminal affords it and drops whole on a
     # narrow one — never a cropped half-timestamp.
-    if int(columns) >= 100:
-        assert "SUBMITTED (UTC)" in header
+    if int(columns) >= 120:
+        assert "SUBMITTED" in header
     else:
         assert "SUBMITTED" not in header
 
 
-def test_rows_carry_the_submission_time(cli, document, schema_file):
+def local_stamp(epoch):
+    """What the listing renders: the submission time in this machine's
+    local zone — the same conversion the code makes, so the test holds
+    under any TZ."""
+    return datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M")
+
+
+def test_rows_carry_the_submission_time_in_local_time(cli, document, schema_file):
     parse_id = parse_file(cli, document)
     extract_item(cli, parse_id, schema_file)
     listed = cli.invoke("history", "list", "--json")
     records = json.loads(listed.stdout)
     assert all(r["submitted_at"] is not None for r in records)
-    from ade_cli.output import timestamp
 
-    # Piped plain lines carry the full timestamp form on every row.
+    # Piped plain lines carry the stamp on every row.
     human = cli.invoke("history", "list")
     for record, line in zip(records, human.stdout.splitlines()):
-        assert timestamp(record["submitted_at"]) in line
+        assert local_stamp(record["submitted_at"]) in line
 
     # The table names the zone once in the header; cells are to-the-minute.
     cli.stdout_tty = True
     table = cli.invoke("history", "list", env={"COLUMNS": "120"})
-    assert "SUBMITTED (UTC)" in table.stdout
-    stamp = timestamp(records[0]["submitted_at"]).removesuffix(" UTC")
-    assert stamp in table.stdout
+    assert "SUBMITTED (" in table.stdout
+    assert local_stamp(records[0]["submitted_at"]) in table.stdout
+
+
+def test_truncated_params_keep_the_model_and_tier(cli, document):
+    # A long pages list makes the full params cell overflow its column;
+    # the cell then elides the middle, never the model or the tier.
+    parse_file(cli, document, "--pages", "1-30", "--tier", "standard")
+
+    # Piped plain lines have no width to defend; the full params stay.
+    human = cli.invoke("history", "list")
+    assert "pages 1,2,3" in human.stdout
+    assert "standard" in human.stdout
+
+    cli.stdout_tty = True
+    result = cli.invoke("history", "list", env={"COLUMNS": "105"})
+
+    assert result.exit_code == 0
+    assert "dpt-3-pro-latest · … · standard" in result.stdout
+    assert "pages 1,2" not in result.stdout
 
 
 # The reported #144 shape: a survey-style schema — 39 fields, names longer
