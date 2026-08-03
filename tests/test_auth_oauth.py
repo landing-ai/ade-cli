@@ -400,11 +400,17 @@ def test_arrow_menu_escape_aborts_before_any_flow(cli):
 
 
 def test_tty_menu_choice_2_runs_the_browser_flow(cli):
+    # Dumb-terminal shape: the typed menu (piped stdin no longer menus —
+    # a piped line is the key, per the README).
     cli.stderr_tty = True
+    cli.stdin_tty = True
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
 
-    result = cli.invoke("auth", "login", "--json", input="2\n", browser=browser)
+    result = cli.invoke(
+        "auth", "login", "--json", input="2\n", browser=browser,
+        env={"TERM": "dumb"},
+    )
 
     assert result.exit_code == 0, result.output
     assert "How would you like to log in?" in result.stderr
@@ -435,9 +441,12 @@ def test_tty_menu_collapses_to_api_key_when_oauth_is_unconfigured(cli, monkeypat
 
     monkeypatch.delitem(oauth._CLIENT_IDS, "production")
     cli.stderr_tty = True
+    cli.stdin_tty = True
 
     cli.transport.respond(200, {"accepted": 0})  # the verification probe (#117)
-    result = cli.invoke("auth", "login", "--json", input=KEY + "\n")
+    result = cli.invoke(
+        "auth", "login", "--json", input=KEY + "\n", env={"TERM": "dumb"}
+    )
 
     assert result.exit_code == 0, result.output
     assert "How would you like to log in?" not in result.stderr
@@ -452,12 +461,13 @@ def test_tty_menu_hides_browser_under_ade_endpoint_without_a_resource(cli):
     # from, so without a resource override the browser option cannot work
     # and only the key prompt appears.
     cli.stderr_tty = True
+    cli.stdin_tty = True
 
     cli.transport.respond(200, {"accepted": 0})  # the verification probe (#117)
     result = cli.invoke(
         "auth", "login", "--json",
         input=KEY + "\n",
-        env={"ADE_ENDPOINT": "https://custom.example.com"},
+        env={"ADE_ENDPOINT": "https://custom.example.com", "TERM": "dumb"},
     )
 
     assert result.exit_code == 0, result.output
@@ -482,13 +492,14 @@ def test_tty_menu_offers_browser_under_ade_endpoint_with_a_resource(cli):
         )
     )
     cli.stderr_tty = True
+    cli.stdin_tty = True
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
 
     result = cli.invoke(
         "auth", "login", "--json",
         input="2\n", browser=browser,
-        env={"ADE_ENDPOINT": "https://custom.example.com"},
+        env={"ADE_ENDPOINT": "https://custom.example.com", "TERM": "dumb"},
     )
 
     assert result.exit_code == 0, result.output

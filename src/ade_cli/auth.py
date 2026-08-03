@@ -243,14 +243,17 @@ def _login_without_key(
     if existing is not None:
         _emit_already(home, resolved, existing, as_json=as_json)
         return
-    if ports.stderr_is_tty():
-        _acquire_interactively(ports, home, resolved, as_json=as_json)
-        return
-    # No terminal to prompt on, but a key piped in is a prompt answered
-    # ahead of time — the headless spelling of the same gesture (F2).
+    # A key piped in is a prompt answered ahead of time — the headless
+    # spelling of the same gesture (F2) — and it wins *before* the menu:
+    # a normal shell pipe (`echo $KEY | ade auth login`) leaves stderr on
+    # the terminal, and the menu would eat the key as its raw selection.
+    # Costless when stdin is a tty or idle (_piped_api_key never blocks).
     piped = _piped_api_key(ports)
     if piped is not None:
         _finish_api_key_login(ports, home, piped, resolved, as_json=as_json)
+        return
+    if ports.stderr_is_tty():
+        _acquire_interactively(ports, home, resolved, as_json=as_json)
         return
     # Straight to the browser flow, whose own checks diagnose
     # misconfiguration authoritatively (client_id, resource, no browser).
@@ -290,8 +293,9 @@ _METHOD_LABELS = (
 def _choose_method(ports: Ports) -> str:
     """API key is first and the default either way, so bare Enter continues
     with it. A real terminal gets the arrow-key pointer (digits jump, Enter
-    confirms); piped stdin, TERM=dumb, and terminals whose raw mode fails
-    get the same list numbered with a typed prompt."""
+    confirms); TERM=dumb and terminals whose raw mode fails get the same
+    list numbered with a typed prompt. (Piped stdin never reaches the
+    menu — a piped line is the key itself, consumed before this.)"""
     if ports.stdin_is_tty() and os.environ.get("TERM") != "dumb":
         typer.echo("How would you like to log in? (↑/↓ and Enter)", err=True)
         try:

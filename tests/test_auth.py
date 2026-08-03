@@ -707,13 +707,17 @@ def test_dumb_terminal_skips_the_arrow_selector(cli):
 
 
 def test_tty_login_menus_and_defaults_to_api_key(cli):
+    # A full terminal whose TERM is dumb: the typed numbered menu (piped
+    # stdin no longer menus — a piped line is the key, per the README).
     cli.stderr_tty = True
+    cli.stdin_tty = True
 
     # Accept the menu default (1 = API key), then give the key — nothing
     # else is asked.
     cli.transport.respond(200, {"accepted": 0})
     result = cli.invoke(
-        "auth", "login", "--json", input="\n" + KEY + "\n"
+        "auth", "login", "--json", input="\n" + KEY + "\n",
+        env={"TERM": "dumb"},
     )
 
     assert result.exit_code == 0, result.output
@@ -731,10 +735,12 @@ def test_tty_menu_api_key_branch_targets_production_without_asking(cli):
     # path — the menu never follows up with an environment question;
     # --env is how another target is named.
     cli.stderr_tty = True
+    cli.stdin_tty = True
 
     cli.transport.respond(200, {"accepted": 0})
     result = cli.invoke(
-        "auth", "login", "--json", input="1\n" + KEY + "\n"
+        "auth", "login", "--json", input="1\n" + KEY + "\n",
+        env={"TERM": "dumb"},
     )
 
     assert result.exit_code == 0, result.output
@@ -747,10 +753,12 @@ def test_tty_menu_api_key_branch_targets_production_without_asking(cli):
 
 def test_tty_menu_env_flag_skips_the_environment_prompt(cli):
     cli.stderr_tty = True
+    cli.stdin_tty = True
 
     cli.transport.respond(200, {"accepted": 0})
     result = cli.invoke(
-        "auth", "login", "--env", "eu", "--json", input="1\n" + KEY + "\n"
+        "auth", "login", "--env", "eu", "--json", input="1\n" + KEY + "\n",
+        env={"TERM": "dumb"},
     )
 
     assert result.exit_code == 0, result.output
@@ -775,10 +783,12 @@ def test_tty_menu_skipped_when_the_target_is_already_authenticated(cli):
 
 def test_tty_menu_reprompts_on_an_unknown_choice(cli):
     cli.stderr_tty = True
+    cli.stdin_tty = True
 
     cli.transport.respond(200, {"accepted": 0})
     result = cli.invoke(
-        "auth", "login", "--json", input="x\n1\n" + KEY + "\n"
+        "auth", "login", "--json", input="x\n1\n" + KEY + "\n",
+        env={"TERM": "dumb"},
     )
 
     assert result.exit_code == 0, result.output
@@ -812,6 +822,25 @@ def test_headless_login_reads_a_key_piped_on_stdin(cli):
     assert payload["method"] == "api_key"
     assert payload["stored"] is True
     assert KEY not in result.stdout  # the payload masks it
+    creds = json.loads(credentials_file(cli).read_text())["environments"]
+    assert creds["production"]["api_key"] == KEY
+
+
+def test_a_piped_key_wins_over_the_menu_when_stderr_is_a_tty(cli):
+    """`echo $KEY | ade auth login` in a normal shell: stdin is the pipe
+    but stderr stays on the terminal. The piped key must be consumed as
+    the answered prompt, never as the method menu's raw selection — the
+    harness getchar raises on any unscripted read, so this also proves
+    the menu was never consulted."""
+    cli.stderr_tty = True
+    cli.transport.respond(200, {"accepted": 0})
+
+    result = cli.invoke("auth", "login", "--json", input=KEY + "\n")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["method"] == "api_key"
+    assert payload["stored"] is True
     creds = json.loads(credentials_file(cli).read_text())["environments"]
     assert creds["production"]["api_key"] == KEY
 
