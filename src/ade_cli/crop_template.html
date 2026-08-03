@@ -473,13 +473,20 @@ document.querySelectorAll("#formattoggle button").forEach(b => {
   document.getElementById("sc-exid").textContent = sc.job_item_id;
   const cited = new Set((D.fields || []).map(f => f.field.replace(/\[\d+\]/g, "")));
   const related = p => [...cited].some(c => c === p || c.startsWith(p + "."));
-  const badge = spec => {
-    const d = spec.type === "array" ? (spec.items && spec.items.type) || "object" : spec.type || "string";
+  // Same union normalization as the viewer's typeBadge: ["string","null"]
+  // is the ordinary nullable spelling, and treating the array as a string
+  // threw TypeError out of the tree walk, truncating the panel silently.
+  function soleType(type) {
+    return Array.isArray(type) ? (type.find(t => t !== "null") || "null") : type;
+  }
+  function badge(spec) {
+    const t = soleType(spec.type);
+    const d = t === "array" ? soleType(spec.items && spec.items.type) || "object" : t || "string";
     const n = d === "integer" ? "number" : d;
     const label = n.charAt(0).toUpperCase() + n.slice(1);
     return { cls: "t-" + (["object","string","number","boolean","enum"].includes(n) ? n : "string"),
-      label: spec.type === "array" ? "Array of " + label : label };
-  };
+      label: t === "array" ? "Array of " + label : label };
+  }
   (function tree(node, container, prefix) {
     for (const [name, spec] of Object.entries((node && node.properties) || {})) {
       const path = prefix ? prefix + "." + name : name;
@@ -498,7 +505,7 @@ document.querySelectorAll("#formattoggle button").forEach(b => {
         d.textContent = d.title = spec.description;
         row.appendChild(d);
       }
-      const child = spec.type === "array" ? spec.items : spec;
+      const child = soleType(spec.type) === "array" ? spec.items : spec;
       if (child && child.properties) {
         // expand/collapse chevron, as in the viewer's schema tree
         const btn = document.createElement("button");

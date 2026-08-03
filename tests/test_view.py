@@ -15,9 +15,11 @@ test_parse.py / test_extract*.py.
 import io
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
+import textwrap
 
 import pytest
 
@@ -1046,5 +1048,46 @@ def test_schema_tree_resolves_union_types_before_descending():
     from ade_cli import view
 
     html = (pathlib.Path(view.__file__).parent / "view_template.html").read_text()
+
+    assert 'const child = soleType(spec.type) === "array" ? spec.items : spec;' in html
+
+
+def _crop_badge_source():
+    """The crop sidebar's duplicated renderer (crop_template.html), lifted
+    with its IIFE indentation removed; ``badge`` is aliased to the
+    harness's ``typeBadge`` name so both templates face one contract."""
+    from ade_cli import view
+
+    html = (pathlib.Path(view.__file__).parent / "crop_template.html").read_text()
+    fns = []
+    for name in ("soleType", "badge"):
+        match = re.search(
+            r"^( *)function %s\(.*?^\1\}$" % name, html, re.S | re.M
+        )
+        assert match, name
+        fns.append(textwrap.dedent(match.group(0)))
+    return "\n".join(fns) + "\nconst typeBadge = badge;\n"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_crop_schema_badges_survive_nullable_union_types(tmp_path):
+    # `ade view --crop` artifacts render schemas through their own copy of
+    # the badge logic; without the same union normalization they keep the
+    # truncation the viewer just fixed.
+    script = tmp_path / "crop-badge.js"
+    script.write_text(SCHEMA_JS_HARNESS % _crop_badge_source())
+
+    proc = subprocess.run(
+        [shutil.which("node"), str(script)], capture_output=True, text=True
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "ok"
+
+
+def test_crop_schema_tree_resolves_union_types_before_descending():
+    from ade_cli import view
+
+    html = (pathlib.Path(view.__file__).parent / "crop_template.html").read_text()
 
     assert 'const child = soleType(spec.type) === "array" ? spec.items : spec;' in html
