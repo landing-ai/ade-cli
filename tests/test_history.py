@@ -213,6 +213,33 @@ def test_history_table_keeps_every_column_inside_the_terminal(
     assert "extract " in result.stdout  # KIND never crops to "extra…"
     assert "extracted" in result.stdout
     assert "production" in result.stdout
+    # SUBMITTED rides where the terminal affords it and drops whole on a
+    # narrow one — never a cropped half-timestamp.
+    if int(columns) >= 100:
+        assert "SUBMITTED (UTC)" in header
+    else:
+        assert "SUBMITTED" not in header
+
+
+def test_rows_carry_the_submission_time(cli, document, schema_file):
+    parse_id = parse_file(cli, document)
+    extract_item(cli, parse_id, schema_file)
+    listed = cli.invoke("history", "list", "--json")
+    records = json.loads(listed.stdout)
+    assert all(r["submitted_at"] is not None for r in records)
+    from ade_cli.output import timestamp
+
+    # Piped plain lines carry the full timestamp form on every row.
+    human = cli.invoke("history", "list")
+    for record, line in zip(records, human.stdout.splitlines()):
+        assert timestamp(record["submitted_at"]) in line
+
+    # The table names the zone once in the header; cells are to-the-minute.
+    cli.stdout_tty = True
+    table = cli.invoke("history", "list", env={"COLUMNS": "120"})
+    assert "SUBMITTED (UTC)" in table.stdout
+    stamp = timestamp(records[0]["submitted_at"]).removesuffix(" UTC")
+    assert stamp in table.stdout
 
 
 # The reported #144 shape: a survey-style schema — 39 fields, names longer
