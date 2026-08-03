@@ -14,6 +14,9 @@ test_parse.py / test_extract*.py.
 
 import io
 import json
+import pathlib
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -969,3 +972,79 @@ def test_view_json_payload_is_unchanged_by_the_hints(cli, parsed):
         "note", "url", "serve_error", "deep_link", "history_items",
         "sidebar_sync",
     }
+
+
+# --- schema panel: the template's JS is executed, not just string-matched -----
+# A TypeError inside view.html is invisible to a Python assertion — the CLI still
+# reports {"status": "viewed"} and the artifact still exists; only the rendered
+# panel is truncated. These tests run the template's own functions under node so
+# the failure mode that shipped (union types aborting schemaTree) has a guard.
+
+SCHEMA_JS_HARNESS = """
+%s
+
+function fail(msg) { console.error(msg); process.exit(1); }
+
+// A nullable leaf is the ordinary JSON Schema spelling: {"type": ["string", "null"]}.
+const nullable = typeBadge({ type: ["string", "null"] });
+if (nullable.label !== "String") fail("nullable leaf: " + nullable.label);
+if (nullable.cls !== "t-string") fail("nullable class: " + nullable.cls);
+
+const nullableNumber = typeBadge({ type: ["number", "null"] });
+if (nullableNumber.label !== "Number") fail("nullable number: " + nullableNumber.label);
+
+// Nullable array of nullable objects still reads as an array of its item type.
+const nullableArray = typeBadge({ type: ["array", "null"], items: { type: ["object", "null"] } });
+if (nullableArray.label !== "Array of Object") fail("nullable array: " + nullableArray.label);
+
+// Plain (non-union) forms keep their existing labels.
+if (typeBadge({ type: "object" }).label !== "Object") fail("object regressed");
+if (typeBadge({ type: "string" }).label !== "String") fail("string regressed");
+if (typeBadge({ type: "integer" }).label !== "Number") fail("integer regressed");
+if (typeBadge({ type: "array", items: { type: "object" } }).label !== "Array of Object")
+  fail("array regressed");
+if (typeBadge({}).label !== "String") fail("missing type regressed");
+
+// soleType keeps "null" when that is genuinely all there is.
+if (soleType(["null"]) !== "null") fail("all-null union");
+console.log("ok");
+"""
+
+
+def _type_badge_source():
+    """The template's own soleType/typeBadge, lifted verbatim."""
+    from ade_cli import view
+
+    html = (pathlib.Path(view.__file__).parent / "view_template.html").read_text()
+    fns = []
+    for name in ("soleType", "typeBadge"):
+        start = html.index("function %s(" % name)
+        end = html.index("\n}\n", start) + len("\n}\n")
+        fns.append(html[start:end])
+    return "\n".join(fns)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
+def test_schema_badges_survive_nullable_union_types(tmp_path):
+    # Regression: `["string","null"]` reached `norm.charAt(0)`, which arrays do not
+    # have. The TypeError escaped schemaTree, so the schema panel stopped rendering
+    # at the first nullable field — every field after it silently vanished.
+    script = tmp_path / "badge.js"
+    script.write_text(SCHEMA_JS_HARNESS % _type_badge_source())
+
+    proc = subprocess.run(
+        [shutil.which("node"), str(script)], capture_output=True, text=True
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "ok"
+
+
+def test_schema_tree_resolves_union_types_before_descending():
+    # The sibling of the badge bug: a nullable array (`["array","null"]`) must still
+    # descend into `items`, or its children never render.
+    from ade_cli import view
+
+    html = (pathlib.Path(view.__file__).parent / "view_template.html").read_text()
+
+    assert 'const child = soleType(spec.type) === "array" ? spec.items : spec;' in html

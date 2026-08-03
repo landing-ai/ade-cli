@@ -1595,14 +1595,23 @@ function jsonLines(value, container, pathed) {
 // Type label + badge color per getTypeLabel/getTypeBadgeClasses
 // (SchemaTreeEditor.tsx:205-243): arrays read "Array of <Item>", colored
 // by the item type; numbers/integers share the Number badge.
+// JSON Schema allows a union type, and ["string", "null"] is the ordinary way to spell
+// a nullable field. Collapse a union to its non-null member before formatting: treating
+// the array as a string threw TypeError out of schemaTree, so the panel rendered only as
+// far as the first nullable leaf and then stopped, silently.
+function soleType(type) {
+  return Array.isArray(type) ? (type.find(t => t !== "null") || "null") : type;
+}
+
 function typeBadge(spec) {
-  const display = spec.type === "array"
-    ? (spec.items && spec.items.type) || "object" : spec.type || "string";
+  const type = soleType(spec.type);
+  const display = type === "array"
+    ? soleType(spec.items && spec.items.type) || "object" : type || "string";
   const norm = display === "integer" ? "number" : display;
   const label = norm.charAt(0).toUpperCase() + norm.slice(1);
   return {
     cls: "t-" + (["object", "string", "number", "boolean", "enum"].includes(norm) ? norm : "string"),
-    label: spec.type === "array" ? "Array of " + label : label,
+    label: type === "array" ? "Array of " + label : label,
   };
 }
 
@@ -1613,7 +1622,7 @@ function schemaTree(node, container, prefix) {
     const path = prefix ? prefix + "." + name : name;
     const row = el("div", "sc-row", container);
     row.dataset.spath = path;
-    const child = spec.type === "array" ? spec.items : spec;
+    const child = soleType(spec.type) === "array" ? spec.items : spec;
     const nested = !!(child && child.properties);
     if (nested) {
       const btn = el("button", "schevbtn", row);
