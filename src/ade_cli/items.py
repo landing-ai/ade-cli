@@ -283,9 +283,19 @@ def artifact_index(store: JobStore, item_id: str) -> list[dict]:
     ]
 
 
+# Caps on the extract field summary: parse params are naturally short
+# (model · tier) but extract params scale with the schema, and a wide
+# schema must never own the row it annotates (#144) — at most this many
+# field names, each clipped to this width, the rest folded into "+N more".
+PARAMS_MAX_FIELDS = 3
+PARAMS_FIELD_WIDTH = 24
+
+
 def compact_params(record: dict) -> str:
     """The one-line params rendering history rows and the sidebar share:
-    model, pages, tier for parse; schema field list + model for extract."""
+    model, pages, tier for parse; schema field summary + model for
+    extract. Bounded whatever the inputs: the field summary is capped, so
+    neither the table's column budget nor a plain line can blow up."""
     params = record.get("params") or {}
     if record["kind"] == "parse":
         parts = [params.get("model") or "?"]
@@ -296,7 +306,16 @@ def compact_params(record: dict) -> str:
             parts.append(params["tier"])
         return " · ".join(parts)
     fields = record.get("fields") or []
-    parts = [", ".join(fields) or "?"]
+    shown = [
+        name
+        if len(name) <= PARAMS_FIELD_WIDTH
+        else name[: PARAMS_FIELD_WIDTH - 1] + "…"
+        for name in fields[:PARAMS_MAX_FIELDS]
+    ]
+    summary = ", ".join(shown) or "?"
+    if len(fields) > PARAMS_MAX_FIELDS:
+        summary += f" +{len(fields) - PARAMS_MAX_FIELDS} more"
+    parts = [summary]
     if params.get("model"):
         parts.append(params["model"])
     return " · ".join(parts)

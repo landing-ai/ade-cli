@@ -163,6 +163,73 @@ def test_referencing_extract_renders_as_an_indented_child_row(
     assert lines.index(child_line) == lines.index(parse_line) + 1
 
 
+# A survey-style schema: many fields, names longer than any column can
+# afford — the shape that blew up listings before the params cap (#144).
+WIDE_FIELDS = ["member_info"] + [
+    f"question_{i:02d}_in_the_past_6_months_how_many_times_did_you_do_this"
+    for i in range(1, 39)
+]
+
+
+@pytest.fixture
+def wide_schema_file(tmp_path):
+    path = tmp_path / "wide-schema.json"
+    path.write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {name: {"type": "string"} for name in WIDE_FIELDS},
+            }
+        )
+    )
+    return path
+
+
+def test_wide_schema_extract_params_are_capped_in_plain_lines_and_sidebar(
+    cli, document, wide_schema_file
+):
+    parse_id = parse_file(cli, document)
+    extract_id = extract_item(cli, parse_id, wide_schema_file)
+
+    human = cli.invoke("history", "list")
+    (line,) = [ln for ln in human.stdout.splitlines() if extract_id in ln]
+    # First fields named (clipped), the rest folded — never all 39.
+    assert "member_info" in line
+    assert "+36 more" in line
+    assert "extract-latest" in line
+    assert "question_04" not in line
+
+    # The sidebar shares the same rendering, so it inherits the cap.
+    (entry,) = [i for i in history_js_items(cli) if i["id"] == extract_id]
+    assert "+36 more" in entry["params"]
+    # --json keeps the full field list; the cap is display-only.
+    listed = cli.invoke("history", "list", "--json")
+    records = {r["job_item_id"]: r for r in json.loads(listed.stdout)}
+    assert records[extract_id]["fields"] == WIDE_FIELDS
+
+
+def test_wide_schema_table_truncates_params_never_the_identity_columns(
+    cli, document, wide_schema_file
+):
+    parse_id = parse_file(cli, document)
+    extract_id = extract_item(cli, parse_id, wide_schema_file)
+
+    cli.stdout_tty = True
+    result = cli.invoke("history", "list", env={"COLUMNS": "100"})
+
+    assert result.exit_code == 0
+    # Headers render whole — a crushed table showed "JOB IT…" (#144).
+    assert "JOB ITEM" in result.stdout
+    assert "SOURCE" in result.stdout
+    # The ids survive whole and SOURCE keeps its floor; PARAMS is what
+    # yields (its cell crops, the folded tail never renders).
+    assert parse_id in result.stdout
+    assert extract_id in result.stdout
+    assert "invoice" in result.stdout
+    assert "+36 more" not in result.stdout  # cropped before the fold
+    assert "question_03" not in result.stdout
+
+
 def test_history_states_derive_from_tickets_zero_api_calls(cli, tmp_path):
     pending_doc = tmp_path / "pending.pdf"
     pending_doc.write_bytes(b"%PDF pending bytes")

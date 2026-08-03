@@ -81,6 +81,10 @@ def _grouped(records: list[dict]) -> list[tuple[dict, bool]]:
     return rows
 
 
+# The narrowest SOURCE (and annotation) share the table defends: PARAMS
+# yields column width before SOURCE drops below this (#144).
+_MIN_SOURCE_BUDGET = 16
+
 # The STATE column is the one people scan; color it by value.
 _STATE_STYLES = {
     "parsed": "green",
@@ -174,6 +178,20 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
         max(len(header), *(len(row[i]) for row in cells))
         for i, header in enumerate(headers)
     ]
+    # PARAMS is the one column that yields (#144): the identity columns
+    # keep their content width and SOURCE keeps its floor, so a wide
+    # params cell crops with an ellipsis rather than crushing the ids.
+    affordable = max(
+        len(headers[4]),
+        console.width - sum(widths[:4]) - 2 * 6 - 2 - _MIN_SOURCE_BUDGET,
+    )
+    if widths[4] > affordable:
+        widths[4] = affordable
+        cells = [
+            (*row[:4], row[4][: affordable - 1] + "…") if len(row[4]) > affordable
+            else row
+            for row in cells
+        ]
     table = Table(box=box.SIMPLE, show_edge=False, pad_edge=False, header_style="bold")
     for header, width_ in zip(headers, widths):
         # width alone is advisory under overflow; min_width pins it so a
@@ -184,7 +202,7 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
     # Budget for SOURCE: what the other columns and their padding leave
     # over. Sources truncate from the left so the basename stays visible;
     # the full source lives in --json.
-    budget = max(16, console.width - sum(widths) - 2 * 6 - 2)
+    budget = max(_MIN_SOURCE_BUDGET, console.width - sum(widths) - 2 * 6 - 2)
     for (record, _indent), row in zip(rows, cells):
         source = tilde(record["source"]) if record["source"] else "?"
         if (record.get("parse") or {}).get("missing"):
