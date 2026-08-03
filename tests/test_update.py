@@ -127,7 +127,7 @@ def release_archive_bytes(tmp_path, asset, binary=b"new binary"):
     """A release asset with the app layout the installers unpack:
     ade/<binary> + ade/_internal/."""
     app = tmp_path / "bundle" / "ade"
-    (app / "_internal").mkdir(parents=True)
+    (app / "_internal").mkdir(parents=True, exist_ok=True)
     (app / "_internal" / "new-lib.bin").write_bytes(b"new lib")
     (app / "ade").write_bytes(binary)
     buffer = io.BytesIO()
@@ -182,6 +182,30 @@ def test_frozen_update_verifies_downloads_and_swaps_atomically(
     urls = [str(request.url) for request in cli.transport.requests]
     assert urls[1] == f"{update_mod.DOWNLOAD_BASE_URL}/{asset}"
     assert urls[2] == f"{update_mod.DOWNLOAD_BASE_URL}/SHA256SUMS.txt"
+
+
+def test_frozen_update_reports_progress_on_stderr(cli, tmp_path, frozen_install):
+    # The download runs tens of seconds against the real channel and read
+    # as a hang without feedback. Milestones ride the guarantee's
+    # progress line: stderr only (stdout keeps the summary), silent
+    # under --json.
+    asset = script_release(cli, tmp_path)
+
+    result = cli.invoke("update", "--yes")
+
+    assert result.exit_code == 0, result.stdout
+    assert f"downloading {asset}" in result.stderr
+    assert "verifying checksum" in result.stderr
+    assert "installing" in result.stderr
+    assert "updated to 99.0.0" in result.stderr
+    assert "downloading" not in result.stdout
+
+    # --json stays fully silent on both streams.
+    (frozen_install / "ade").write_bytes(b"old binary")
+    script_release(cli, tmp_path)
+    silent = cli.invoke("update", "--yes", "--json")
+    assert silent.exit_code == 0
+    assert silent.stderr == ""
 
 
 def test_frozen_update_refuses_a_checksum_mismatch(cli, tmp_path, frozen_install):

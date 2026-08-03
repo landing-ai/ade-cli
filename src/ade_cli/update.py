@@ -200,15 +200,28 @@ def update(
     ports: Ports = ctx.obj
     current = current_version()
     mode = install_mode()
+    # The guarantee's progress line (#33), reused for the slow parts here
+    # — the ~100 MB download most of all, which read as a hang without it.
+    # stderr only, silent under --json; imported lazily (guarantee.py
+    # imports this module for the unknown-model hint).
+    from .guarantee import Progress
+
+    progress = Progress(
+        ports.clock,
+        "off" if as_json else ("tty" if ports.stderr_is_tty() else "plain"),
+    )
+    progress.update(label="checking the release channel")
     try:
         latest = fetch_latest(ports.transport, timeout=CHECK_TIMEOUT_SECONDS)
     except UpdateCheckError as error:
+        progress.close()
         exit_with(
             {"error": "update_check_failed", "message": str(error), "current": current},
             f"Cannot check for updates: {error}.",
             as_json=as_json,
             code=EXIT_FAILED,
         )
+    progress.close()
     # The explicit check counts against the periodic throttle too — a
     # fresh `update` should buy a quiet day, whatever it concluded.
     _write_cache(_home(os.environ), latest=latest)
@@ -252,7 +265,7 @@ def update(
         if not typer.confirm(f"Update ade {current} -> {latest}?"):
             emit(payload, "Update declined; nothing changed.", as_json=as_json)
             return
-    _self_replace(ports.transport, latest=latest, as_json=as_json)
+    _self_replace(ports.transport, latest=latest, as_json=as_json, progress=progress)
     emit(
         {**payload, "updated": True},
         f"Updated ade {current} -> {latest} in {install_root()} — takes "
@@ -262,25 +275,29 @@ def update(
 
 
 def _self_replace(
-    transport: httpx.BaseTransport, *, latest: str, as_json: bool
+    transport: httpx.BaseTransport, *, latest: str, as_json: bool, progress
 ) -> None:
     """Download, verify, and swap in the latest frozen app. Mirrors
     install.sh: stage *inside* the install dir so the final steps are
     same-filesystem renames, verify against SHA256SUMS.txt before
     touching anything, and validate the archive's layout before the
     first rename — past that point every step is a rename that cannot
-    half-copy."""
+    half-copy. Every phase reports on the progress line — the download
+    runs tens of seconds and read as a hang without one."""
+
+    def fail(payload: dict, human: str) -> None:
+        progress.close()
+        exit_with(payload, human, as_json=as_json, code=EXIT_FAILED)
+
     target = platform_target()
     if target is None:
-        exit_with(
+        fail(
             {
                 "error": "unsupported_platform",
                 "platform": f"{sys.platform}-{platform.machine()}",
             },
             f"No release asset exists for this platform "
             f"({sys.platform} {platform.machine()}); re-install manually.",
-            as_json=as_json,
-            code=EXIT_FAILED,
         )
     asset = asset_name(target)
     root = install_root()
@@ -289,34 +306,43 @@ def _self_replace(
         try:
             staging.mkdir(parents=True)
         except OSError as error:
-            exit_with(
+            fail(
                 {"error": "update_failed", "message": f"cannot stage in {root}: {error}"},
                 f"Cannot write to the install directory {root} ({error}); "
                 "re-run with the permissions the install has, or re-install.",
-                as_json=as_json,
-                code=EXIT_FAILED,
             )
         archive = staging / asset
         with httpx.Client(
             transport=transport, timeout=CHECK_TIMEOUT_SECONDS, follow_redirects=True
         ) as client:
-            _download(client, f"{DOWNLOAD_BASE_URL}/{asset}", archive, as_json=as_json)
+            _download(
+                client,
+                f"{DOWNLOAD_BASE_URL}/{asset}",
+                archive,
+                progress=progress,
+                label=f"downloading {asset}",
+                fail=fail,
+            )
             sums = staging / "SHA256SUMS.txt"
             _download(
-                client, f"{DOWNLOAD_BASE_URL}/SHA256SUMS.txt", sums, as_json=as_json
+                client,
+                f"{DOWNLOAD_BASE_URL}/SHA256SUMS.txt",
+                sums,
+                progress=progress,
+                label="downloading SHA256SUMS.txt",
+                fail=fail,
             )
+        progress.update(label="verifying checksum")
         expected = _expected_sum(sums.read_text(encoding="utf-8"), asset)
         if expected is None:
-            exit_with(
+            fail(
                 {"error": "checksum_unavailable", "asset": asset},
                 f"SHA256SUMS.txt on the release has no entry for {asset}; "
                 "not installing an unverifiable download.",
-                as_json=as_json,
-                code=EXIT_FAILED,
             )
         actual = hashlib.sha256(archive.read_bytes()).hexdigest()
         if actual != expected:
-            exit_with(
+            fail(
                 {
                     "error": "checksum_mismatch",
                     "asset": asset,
@@ -325,51 +351,61 @@ def _self_replace(
                 },
                 f"Checksum mismatch for {asset} — refusing to install a "
                 "download that does not match the release's SHA256SUMS.txt.",
-                as_json=as_json,
-                code=EXIT_FAILED,
             )
+        progress.update(label="installing")
         new_dir = staging / "new"
         _extract_archive(archive, new_dir)
         # The archive holds a onedir app: ade/<binary> + ade/_internal/.
         binary_name = Path(sys.executable).name
         new_app = new_dir / "ade"
         if not (new_app / binary_name).is_file() or not (new_app / "_internal").is_dir():
-            exit_with(
+            fail(
                 {"error": "bad_release_archive", "asset": asset},
                 f"The release archive {asset} does not contain the expected "
                 "app layout; not installing it.",
-                as_json=as_json,
-                code=EXIT_FAILED,
             )
         _swap(root, new_app, binary_name)
+        progress.update(label=f"updated to {latest}")
+        progress.close()
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
 
 def _download(
-    client: httpx.Client, url: str, dest: Path, *, as_json: bool
+    client: httpx.Client, url: str, dest: Path, *, progress, label: str, fail
 ) -> None:
+    """Stream ``url`` to ``dest``, reporting received/total on the
+    progress line per chunk (tty rewrites in place; plain mode dedups to
+    one line per 10%). A body without Content-Length still shows the
+    moving label, just without a percentage."""
+    progress.update(label=label)
     try:
-        response = client.get(url)
+        with client.stream("GET", url) as response:
+            if response.status_code != 200:
+                fail(
+                    {
+                        "error": "update_download_failed",
+                        "url": url,
+                        "status_code": response.status_code,
+                    },
+                    f"Download failed for {url} (HTTP {response.status_code}).",
+                )
+            try:
+                total = int(response.headers.get("Content-Length", ""))
+            except ValueError:
+                total = 0
+            received = 0
+            with dest.open("wb") as out:
+                for chunk in response.iter_bytes():
+                    out.write(chunk)
+                    received += len(chunk)
+                    if total:
+                        progress.update(label=label, fraction=received / total)
     except httpx.HTTPError as error:
-        exit_with(
+        fail(
             {"error": "update_download_failed", "url": url, "message": str(error)},
             f"Download failed for {url}: {error}.",
-            as_json=as_json,
-            code=EXIT_FAILED,
         )
-    if response.status_code != 200:
-        exit_with(
-            {
-                "error": "update_download_failed",
-                "url": url,
-                "status_code": response.status_code,
-            },
-            f"Download failed for {url} (HTTP {response.status_code}).",
-            as_json=as_json,
-            code=EXIT_FAILED,
-        )
-    dest.write_bytes(response.content)
 
 
 def _expected_sum(sums_text: str, asset: str) -> str | None:
