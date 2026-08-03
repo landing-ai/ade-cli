@@ -77,7 +77,29 @@ def _load_schema(spec: str, *, as_json: bool) -> dict:
     """``--schema`` accepts a JSON Schema file path or an inline JSON
     object; anything else is a usage error."""
     path = Path(spec)
-    text = path.read_text(encoding="utf-8") if path.is_file() else spec
+    try:
+        is_file = path.is_file()
+    except OSError:
+        # Probing an inline JSON object longer than the filesystem's name
+        # limit makes stat() raise (ENAMETOOLONG) instead of returning
+        # False — a spec the OS cannot even stat is never a path (#143).
+        is_file = False
+    if is_file:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as error:
+            exit_with(
+                {
+                    "error": "bad_schema",
+                    "message": f"--schema file {spec} is unreadable: {error}",
+                },
+                f"--schema {spec!r} names a file that cannot be read "
+                f"({error}); fix the file or pass an inline JSON object.",
+                as_json=as_json,
+                code=EXIT_USAGE,
+            )
+    else:
+        text = spec
     try:
         schema = json.loads(text)
     except json.JSONDecodeError:
