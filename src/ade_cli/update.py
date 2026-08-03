@@ -40,7 +40,7 @@ import zipfile
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _installed_version
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, NoReturn
 
 import httpx
 import typer
@@ -285,7 +285,7 @@ def _self_replace(
     half-copy. Every phase reports on the progress line — the download
     runs tens of seconds and read as a hang without one."""
 
-    def fail(payload: dict, human: str) -> None:
+    def fail(payload: dict, human: str) -> NoReturn:
         progress.close()
         exit_with(payload, human, as_json=as_json, code=EXIT_FAILED)
 
