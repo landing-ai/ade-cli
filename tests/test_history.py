@@ -163,6 +163,58 @@ def test_referencing_extract_renders_as_an_indented_child_row(
     assert lines.index(child_line) == lines.index(parse_line) + 1
 
 
+def test_params_show_a_field_count_never_the_schema_field_names(
+    cli, document, schema_file
+):
+    """A big schema used to drown every other column (#134-style listing
+    rot): the human params cell says how many fields, not which — the full
+    list stays in --json and the record's ``fields``."""
+    parse_id = parse_file(cli, document)
+    extract_id = extract_item(cli, parse_id, schema_file)
+
+    human = cli.invoke("history", "list")
+    assert "2 fields" in human.stdout
+    assert "total, vendor" not in human.stdout
+    assert "extract-latest" in human.stdout  # the model still renders
+
+    # The sidebar read model shares the same compact rendering.
+    cli.invoke("history", "list", "--json")
+    by_id = {item["id"]: item for item in history_js_items(cli)}
+    assert by_id[extract_id]["params"] == "extract-latest · 2 fields"
+
+    # And the machine payload keeps the exact field list.
+    result = cli.invoke("history", "list", "--json")
+    records = {r["job_item_id"]: r for r in json.loads(result.stdout)}
+    assert records[extract_id]["fields"] == ["total", "vendor"]
+
+
+@pytest.mark.parametrize("columns", ["120", "80"])
+def test_history_table_keeps_every_column_inside_the_terminal(
+    cli, document, schema_file, columns
+):
+    """The TTY table never lets one column push another off-screen: all
+    six headers render, ids stay whole, child rows carry the tree marker,
+    and no line exceeds the terminal width."""
+    parse_id = parse_file(cli, document)
+    extract_id = extract_item(cli, parse_id, schema_file)
+    cli.stdout_tty = True
+
+    result = cli.invoke("history", "list", env={"COLUMNS": columns})
+
+    assert result.exit_code == 0
+    lines = result.stdout.splitlines()
+    header = lines[0]
+    for name in ("JOB ITEM", "KIND", "STATE", "ENV", "PARAMS", "SOURCE"):
+        assert name in header
+    assert all(len(line) <= int(columns) for line in lines)
+    # Identity columns never crop, whatever the width.
+    assert any(line.startswith(parse_id) for line in lines)
+    assert any(line.startswith(f"└ {extract_id}") for line in lines)
+    assert "extract " in result.stdout  # KIND never crops to "extra…"
+    assert "extracted" in result.stdout
+    assert "production" in result.stdout
+
+
 def test_history_states_derive_from_tickets_zero_api_calls(cli, tmp_path):
     pending_doc = tmp_path / "pending.pdf"
     pending_doc.write_bytes(b"%PDF pending bytes")

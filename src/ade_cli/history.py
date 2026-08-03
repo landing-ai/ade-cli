@@ -157,7 +157,9 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
 
     cells = [
         (
-            ("  " if indent else "") + record["job_item_id"],
+            # Child rows (extracts under their parse) carry a tree marker,
+            # not bare indentation — two leading spaces read as misalignment.
+            ("└ " if indent else "") + record["job_item_id"],
             record["kind"],
             record["state"],
             # Items from before the environment field read as "?", never a
@@ -167,24 +169,43 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
         )
         for record, indent in rows
     ]
-    # Fix the five data columns at their content width so rich never
-    # shrinks them; SOURCE alone absorbs the terminal width.
     headers = ("JOB ITEM", "KIND", "STATE", "ENV", "PARAMS")
     widths = [
         max(len(header), *(len(row[i]) for row in cells))
         for i, header in enumerate(headers)
     ]
+    # The identity columns (id, kind, state, env) are naturally narrow and
+    # fix at content width so rich never shrinks them. PARAMS takes what
+    # the terminal leaves after those plus a floor for SOURCE — and wraps
+    # inside its own cell when longer, so no column ever pushes another
+    # off-screen. Under box.SIMPLE each column costs two padding cells
+    # (minus the outer pair, pad_edge=False) plus a divider cell between
+    # columns; undercounting this is what used to tip rich into its crop
+    # cascade, which shaves the pinned columns too.
+    ncols = 6
+    overhead = (2 * ncols - 2) + (ncols - 1)
+    widths[4] = min(
+        widths[4],
+        40,  # a params cell is a summary; past this, SOURCE needs it more
+        max(12, console.width - sum(widths[:4]) - overhead - 12),
+    )
     table = Table(box=box.SIMPLE, show_edge=False, pad_edge=False, header_style="bold")
-    for header, width_ in zip(headers, widths):
+    for header, width_ in zip(headers[:4], widths[:4]):
         # width alone is advisory under overflow; min_width pins it so a
         # narrow terminal crops SOURCE, never the identity columns.
         table.add_column(header, no_wrap=True, width=width_, min_width=width_)
+    # overflow="fold" wraps params onto continuation lines within the cell
+    # (even a single long token); the full value lives in --json.
+    table.add_column(
+        "PARAMS", width=widths[4], min_width=widths[4], overflow="fold"
+    )
     table.add_column("SOURCE", no_wrap=True)
 
-    # Budget for SOURCE: what the other columns and their padding leave
-    # over. Sources truncate from the left so the basename stays visible;
-    # the full source lives in --json.
-    budget = max(16, console.width - sum(widths) - 2 * 6 - 2)
+    # Budget for SOURCE: exactly what the other columns and the overhead
+    # leave over, so the table never exceeds the terminal. Sources truncate
+    # from the left so the basename stays visible; the full source lives
+    # in --json.
+    budget = max(8, console.width - sum(widths) - overhead)
     for (record, _indent), row in zip(rows, cells):
         source = tilde(record["source"]) if record["source"] else "?"
         if (record.get("parse") or {}).get("missing"):

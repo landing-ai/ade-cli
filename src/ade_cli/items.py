@@ -285,7 +285,9 @@ def artifact_index(store: JobStore, item_id: str) -> list[dict]:
 
 def compact_params(record: dict) -> str:
     """The one-line params rendering history rows and the sidebar share:
-    model, pages, tier for parse; schema field list + model for extract."""
+    model, pages, tier for parse; model + schema field count for extract.
+    The field *names* stay out — a big schema would drown every other
+    column — the full list lives in ``--json``."""
     params = record.get("params") or {}
     if record["kind"] == "parse":
         parts = [params.get("model") or "?"]
@@ -295,10 +297,11 @@ def compact_params(record: dict) -> str:
         if params.get("tier"):
             parts.append(params["tier"])
         return " · ".join(parts)
+    parts = [params.get("model") or "?"]
     fields = record.get("fields") or []
-    parts = [", ".join(fields) or "?"]
-    if params.get("model"):
-        parts.append(params["model"])
+    if fields:
+        plural = "s" if len(fields) != 1 else ""
+        parts.append(f"{len(fields)} field{plural}")
     return " · ".join(parts)
 
 
