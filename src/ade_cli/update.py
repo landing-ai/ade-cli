@@ -37,6 +37,7 @@ import sys
 import tarfile
 import time
 import zipfile
+from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _installed_version
 from pathlib import Path
@@ -46,6 +47,7 @@ import httpx
 import typer
 
 from .config import load_config
+from .filelock import exclusive
 from .output import EXIT_FAILED, EXIT_USAGE, JSON_FLAG, emit, exit_with
 from .ports import Ports
 
@@ -62,6 +64,7 @@ CHECK_TIMEOUT_SECONDS = 10.0
 NUDGE_TIMEOUT_SECONDS = 3.0
 CHECK_INTERVAL_SECONDS = 24 * 3600.0
 CACHE_NAME = "update-check.json"
+CACHE_LOCK_NAME = ".update-check.lock"
 
 
 class UpdateCheckError(Exception):
@@ -112,19 +115,34 @@ def is_newer(candidate: str | None, current: str) -> bool:
     return new > old
 
 
+@dataclass(frozen=True)
+class Release:
+    """What the version check learned: the latest version, plus the
+    release's asset ids — the handle the authenticated download path
+    needs while the repo is private (install.sh's fetch_api)."""
+
+    version: str
+    assets: dict[str, int]  # asset name -> asset id
+
+
+def _ambient_token() -> str | None:
+    """An ambient GITHUB_TOKEN/GH_TOKEN — used when present, never
+    stored (install.sh's posture). Lifts the anonymous API rate limit
+    and covers the private-repo window."""
+    return os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+
+
 def fetch_latest(
     transport: httpx.BaseTransport, *, timeout: float
-) -> str | None:
-    """The latest release's version (tag without the ``v``), or None when
-    the channel is unavailable in the way that means "skip silently":
-    404/403 is what the unauthenticated API answers while the repo is
-    private (or has no release yet), and 403 is also its anonymous
-    rate-limit answer. An ambient GITHUB_TOKEN/GH_TOKEN rides along when
-    present — the same posture as install.sh, never stored. Anything
-    else — network failure, an unexpected status, a malformed body —
-    raises UpdateCheckError."""
+) -> Release | None:
+    """The latest release (version without the ``v``, plus asset ids), or
+    None when the channel is unavailable in the way that means "skip
+    silently": 404/403 is what the unauthenticated API answers while the
+    repo is private (or has no release yet), and 403 is also its
+    anonymous rate-limit answer. Anything else — network failure, an
+    unexpected status, a malformed body — raises UpdateCheckError."""
     headers = {"Accept": "application/vnd.github+json"}
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    token = _ambient_token()
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
@@ -143,12 +161,22 @@ def fetch_latest(
             f"release channel answered HTTP {response.status_code}"
         )
     try:
-        tag = response.json().get("tag_name")
+        body = response.json()
     except json.JSONDecodeError:
-        tag = None
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    tag = body.get("tag_name")
     if not isinstance(tag, str) or not tag:
         raise UpdateCheckError("release channel sent no tag_name")
-    return tag.lstrip("v")
+    assets = {
+        entry["name"]: entry["id"]
+        for entry in (body.get("assets") or [])
+        if isinstance(entry, dict)
+        and isinstance(entry.get("name"), str)
+        and isinstance(entry.get("id"), int)
+    }
+    return Release(version=tag.lstrip("v"), assets=assets)
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +240,7 @@ def update(
     )
     progress.update(label="checking the release channel")
     try:
-        latest = fetch_latest(ports.transport, timeout=CHECK_TIMEOUT_SECONDS)
+        release = fetch_latest(ports.transport, timeout=CHECK_TIMEOUT_SECONDS)
     except UpdateCheckError as error:
         progress.close()
         exit_with(
@@ -222,6 +250,7 @@ def update(
             code=EXIT_FAILED,
         )
     progress.close()
+    latest = release.version if release else None
     # The explicit check counts against the periodic throttle too — a
     # fresh `update` should buy a quiet day, whatever it concluded.
     _write_cache(_home(os.environ), latest=latest)
@@ -265,7 +294,8 @@ def update(
         if not typer.confirm(f"Update ade {current} -> {latest}?"):
             emit(payload, "Update declined; nothing changed.", as_json=as_json)
             return
-    _self_replace(ports.transport, latest=latest, as_json=as_json, progress=progress)
+    assert release is not None  # is_newer(None, …) is False
+    _self_replace(ports.transport, release=release, as_json=as_json, progress=progress)
     emit(
         {**payload, "updated": True},
         f"Updated ade {current} -> {latest} in {install_root()} — takes "
@@ -274,8 +304,27 @@ def update(
     )
 
 
+def _asset_request(release: Release, name: str) -> tuple[str, dict]:
+    """(url, headers) for one release asset: the public versionless
+    latest/download URL normally; with an ambient token and a known
+    asset id, GitHub's authenticated release-assets endpoint instead —
+    the one download path that works while the repo is private
+    (install.sh's fetch_api)."""
+    token = _ambient_token()
+    asset_id = release.assets.get(name)
+    if token and asset_id is not None:
+        return (
+            f"https://api.github.com/repos/{REPO}/releases/assets/{asset_id}",
+            {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/octet-stream",
+            },
+        )
+    return f"{DOWNLOAD_BASE_URL}/{name}", {}
+
+
 def _self_replace(
-    transport: httpx.BaseTransport, *, latest: str, as_json: bool, progress
+    transport: httpx.BaseTransport, *, release: Release, as_json: bool, progress
 ) -> None:
     """Download, verify, and swap in the latest frozen app. Mirrors
     install.sh: stage *inside* the install dir so the final steps are
@@ -315,18 +364,24 @@ def _self_replace(
         with httpx.Client(
             transport=transport, timeout=CHECK_TIMEOUT_SECONDS, follow_redirects=True
         ) as client:
-            _download(
+            url, headers = _asset_request(release, asset)
+            # The digest comes out of the download stream itself — the
+            # ~100 MB archive is never re-read (or held) in memory.
+            actual = _download(
                 client,
-                f"{DOWNLOAD_BASE_URL}/{asset}",
+                url,
+                headers,
                 archive,
                 progress=progress,
                 label=f"downloading {asset}",
                 fail=fail,
             )
             sums = staging / "SHA256SUMS.txt"
+            url, headers = _asset_request(release, "SHA256SUMS.txt")
             _download(
                 client,
-                f"{DOWNLOAD_BASE_URL}/SHA256SUMS.txt",
+                url,
+                headers,
                 sums,
                 progress=progress,
                 label="downloading SHA256SUMS.txt",
@@ -340,7 +395,6 @@ def _self_replace(
                 f"SHA256SUMS.txt on the release has no entry for {asset}; "
                 "not installing an unverifiable download.",
             )
-        actual = hashlib.sha256(archive.read_bytes()).hexdigest()
         if actual != expected:
             fail(
                 {
@@ -354,7 +408,16 @@ def _self_replace(
             )
         progress.update(label="installing")
         new_dir = staging / "new"
-        _extract_archive(archive, new_dir)
+        try:
+            _extract_archive(archive, new_dir)
+        except (tarfile.TarError, zipfile.BadZipFile, OSError) as error:
+            # Correctly checksummed but malformed still exits structured,
+            # never a traceback over a half-drawn progress line.
+            fail(
+                {"error": "bad_release_archive", "asset": asset, "message": str(error)},
+                f"The release archive {asset} cannot be unpacked ({error}); "
+                "not installing it.",
+            )
         # The archive holds a onedir app: ade/<binary> + ade/_internal/.
         binary_name = Path(sys.executable).name
         new_app = new_dir / "ade"
@@ -365,22 +428,31 @@ def _self_replace(
                 "app layout; not installing it.",
             )
         _swap(root, new_app, binary_name)
-        progress.update(label=f"updated to {latest}")
+        progress.update(label=f"updated to {release.version}")
         progress.close()
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
 
 def _download(
-    client: httpx.Client, url: str, dest: Path, *, progress, label: str, fail
-) -> None:
-    """Stream ``url`` to ``dest``, reporting received/total on the
-    progress line per chunk (tty rewrites in place; plain mode dedups to
-    one line per 10%). A body without Content-Length still shows the
-    moving label, just without a percentage."""
+    client: httpx.Client,
+    url: str,
+    headers: dict,
+    dest: Path,
+    *,
+    progress,
+    label: str,
+    fail,
+) -> str:
+    """Stream ``url`` to ``dest`` and return the body's sha256 hexdigest,
+    reporting received/total on the progress line per chunk (tty rewrites
+    in place; plain mode dedups to one line per 10%). A body without
+    Content-Length still shows the moving label, just without a
+    percentage."""
     progress.update(label=label)
+    digest = hashlib.sha256()
     try:
-        with client.stream("GET", url) as response:
+        with client.stream("GET", url, headers=headers) as response:
             if response.status_code != 200:
                 fail(
                     {
@@ -398,6 +470,7 @@ def _download(
             with dest.open("wb") as out:
                 for chunk in response.iter_bytes():
                     out.write(chunk)
+                    digest.update(chunk)
                     received += len(chunk)
                     if total:
                         progress.update(label=label, fraction=received / total)
@@ -406,6 +479,7 @@ def _download(
             {"error": "update_download_failed", "url": url, "message": str(error)},
             f"Download failed for {url}: {error}.",
         )
+    return digest.hexdigest()
 
 
 def _expected_sum(sums_text: str, asset: str) -> str | None:
@@ -436,7 +510,14 @@ def _swap(root: Path, new_app: Path, binary_name: str) -> None:
     running ``.exe`` or its mapped DLLs, but it *can* rename them — then
     the new pieces move in. The aside-renamed leftovers are swept right
     away where the OS allows and by a later run's sweep where it does
-    not."""
+    not.
+
+    Same posture as install.sh, deliberately: a concurrently *launched*
+    ade can hit the brief window between the renames (old binary, new
+    ``_internal``); an already-running one keeps its open inodes and is
+    unaffected. The layout validation above this call is what makes the
+    rename sequence safe to enter — nothing past the first rename can
+    discover a bad archive."""
     marker = f".old.{os.getpid()}"
     if (root / "_internal").exists():
         os.rename(root / "_internal", root / f"_internal{marker}")
@@ -448,15 +529,26 @@ def _swap(root: Path, new_app: Path, binary_name: str) -> None:
     sweep_stale(root)
 
 
+# Staging dirs younger than this may belong to an update still running
+# in another process; only provably abandoned ones are swept.
+STALE_STAGING_SECONDS = 3600.0
+
+
 def sweep_stale(root: Path) -> None:
-    """Remove leftovers earlier updates renamed aside (and abandoned
-    staging dirs). On Windows the pieces a running process still maps
+    """Remove leftovers earlier updates renamed aside, and staging dirs
+    proven abandoned (an in-flight update in another process owns a
+    *young* ``.ade-update-<pid>`` — sweeping it mid-download would abort
+    a valid update). On Windows the pieces a running process still maps
     survive the attempt — a later run's sweep gets them. Never raises."""
     try:
-        entries = [
-            *root.glob("*.old.*"),
-            *root.glob(".ade-update-*"),
-        ]
+        entries = list(root.glob("*.old.*"))
+        cutoff = time.time() - STALE_STAGING_SECONDS
+        for staging in root.glob(".ade-update-*"):
+            try:
+                if staging.stat().st_mtime < cutoff:
+                    entries.append(staging)
+            except OSError:
+                continue
     except OSError:
         return
     for entry in entries:
@@ -500,14 +592,39 @@ def _read_cache(home: Path) -> dict:
 
 
 def _write_cache(home: Path, *, latest: str | None) -> None:
+    """Publish the throttle stamp atomically (write-temp-then-replace) —
+    a reader never observes a half-written cache."""
     try:
         home.mkdir(parents=True, exist_ok=True)
-        (home / CACHE_NAME).write_text(
+        tmp = home / f".{CACHE_NAME}.tmp.{os.getpid()}"
+        tmp.write_text(
             json.dumps({"checked_at": time.time(), "latest": latest}),
             encoding="utf-8",
         )
+        os.replace(tmp, home / CACHE_NAME)
     except OSError:
         pass
+
+
+def _reserve_check(home: Path) -> bool:
+    """Whether this process may probe now: under the cross-process lock,
+    a fresh stamp means someone else already checked (or reserved) this
+    window — the at-most-once-per-24h promise holds across concurrent
+    CLIs. Reserving stamps *before* the probe; the result overwrites the
+    stamp after, and a failed probe simply leaves the reservation as the
+    attempt record."""
+    home.mkdir(parents=True, exist_ok=True)
+    with exclusive(home / CACHE_LOCK_NAME):
+        cache = _read_cache(home)
+        checked_at = cache.get("checked_at")
+        if (
+            isinstance(checked_at, (int, float))
+            and time.time() - float(checked_at) < CHECK_INTERVAL_SECONDS
+        ):
+            return False
+        previous = cache.get("latest")
+        _write_cache(home, latest=previous if isinstance(previous, str) else None)
+        return True
 
 
 def after_command(
@@ -533,18 +650,16 @@ def after_command(
         home = _home(env)
         if not check_enabled(env, home):
             return
-        cache = _read_cache(home)
-        checked_at = cache.get("checked_at")
-        if (
-            isinstance(checked_at, (int, float))
-            and time.time() - float(checked_at) < CHECK_INTERVAL_SECONDS
-        ):
+        # Reserve the window under the cross-process lock before probing:
+        # two CLIs racing a stale cache still make one probe between them.
+        if not _reserve_check(home):
             return
         try:
-            latest = fetch_latest(transport, timeout=NUDGE_TIMEOUT_SECONDS)
+            release = fetch_latest(transport, timeout=NUDGE_TIMEOUT_SECONDS)
         except UpdateCheckError:
-            latest = None
-        # Stamp the attempt whatever it answered: an unreachable channel
+            release = None
+        latest = release.version if release else None
+        # Stamp the answer over the reservation: an unreachable channel
         # must not turn into a probe per command.
         _write_cache(home, latest=latest)
         current = current_version()

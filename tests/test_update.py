@@ -11,8 +11,10 @@ swap is asserted on real files.
 import hashlib
 import io
 import json
+import os
 import sys
 import tarfile
+import time
 import zipfile
 from importlib.metadata import version as installed_version
 
@@ -253,12 +255,82 @@ def test_a_later_run_sweeps_windows_style_leftovers(cli, frozen_install):
     # command's post-run hook, exercised here through the seam.
     (frozen_install / "ade.old.123").write_bytes(b"stale")
     (frozen_install / "_internal.old.123").mkdir()
+    # A *young* staging dir may be another process's in-flight update —
+    # sweeping it mid-download would abort a valid update; only a
+    # provably abandoned one (past the staleness window) is swept.
+    active = frozen_install / ".ade-update-999"
+    active.mkdir()
+    abandoned = frozen_install / ".ade-update-777"
+    abandoned.mkdir()
+    stale = time.time() - 2 * update_mod.STALE_STAGING_SECONDS
+    os.utime(abandoned, (stale, stale))
 
     result = cli.invoke("history", "list", "--json")
 
     assert result.exit_code == 0
     assert not (frozen_install / "ade.old.123").exists()
     assert not (frozen_install / "_internal.old.123").exists()
+    assert active.exists()
+    assert not abandoned.exists()
+
+
+def test_a_token_downloads_assets_through_the_github_api(
+    cli, tmp_path, frozen_install
+):
+    # While the repo is private, latest/download 404s even with a valid
+    # token — the authenticated path is the release-assets API, resolved
+    # from the asset ids the version probe already returned (install.sh's
+    # fetch_api).
+    asset = update_mod.asset_name(update_mod.platform_target())
+    payload = release_archive_bytes(tmp_path, asset)
+    digest = hashlib.sha256(payload).hexdigest()
+    cli.transport.respond(
+        200,
+        {
+            "tag_name": "v99.0.0",
+            "assets": [
+                {"name": asset, "id": 111},
+                {"name": "SHA256SUMS.txt", "id": 222},
+            ],
+        },
+    )
+    cli.transport.respond_with(lambda request: httpx.Response(200, content=payload))
+    cli.transport.respond_with(
+        lambda request: httpx.Response(200, content=f"{digest}  {asset}\n".encode())
+    )
+
+    result = cli.invoke("update", "--yes", "--json", env={"GITHUB_TOKEN": "ghp_x"})
+
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout)["updated"] is True
+    urls = [str(request.url) for request in cli.transport.requests]
+    assert urls[1].endswith("/releases/assets/111")
+    assert urls[2].endswith("/releases/assets/222")
+    for request in cli.transport.requests[1:]:
+        assert request.headers["Authorization"] == "Bearer ghp_x"
+        assert request.headers["Accept"] == "application/octet-stream"
+
+
+def test_a_malformed_but_checksummed_archive_is_a_structured_error(
+    cli, tmp_path, frozen_install
+):
+    # Correct checksum, garbage bytes: extraction must exit through the
+    # structured bad_release_archive path, never a traceback.
+    garbage = b"not an archive at all"
+    digest = hashlib.sha256(garbage).hexdigest()
+    asset = update_mod.asset_name(update_mod.platform_target())
+    script_latest(cli, "v99.0.0")
+    cli.transport.respond_with(lambda request: httpx.Response(200, content=garbage))
+    cli.transport.respond_with(
+        lambda request: httpx.Response(200, content=f"{digest}  {asset}\n".encode())
+    )
+
+    result = cli.invoke("update", "--yes", "--json")
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error"] == "bad_release_archive"
+    assert (frozen_install / "ade").read_bytes() == b"old binary"
+    assert not list(frozen_install.glob(".ade-update-*"))
 
 
 # --- the periodic check + nudge ---------------------------------------------
