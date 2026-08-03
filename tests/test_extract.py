@@ -9,7 +9,6 @@ billing-visible behavior (submits) is asserted on the fake transport.
 """
 
 import json
-import os
 
 import pytest
 
@@ -660,19 +659,39 @@ def test_long_inline_non_json_schema_is_a_structured_usage_error(cli, document):
     assert json.loads(result.stdout)["error"] == "bad_schema"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
 def test_an_unreadable_schema_file_is_a_structured_usage_error(
-    cli, document, tmp_path
+    cli, document, tmp_path, monkeypatch
 ):
+    # An OS-level read failure, simulated rather than provoked via
+    # chmod(0) — root (containerized CI) reads through permission bits.
     locked = tmp_path / "locked-schema.json"
     locked.write_text(json.dumps(SCHEMA))
-    locked.chmod(0)
-    try:
-        result = cli.invoke(
-            "extract", "some-item-id", "--schema", str(locked), "--json", env=AUTH_ENV
-        )
-    finally:
-        locked.chmod(0o600)
+
+    from pathlib import Path
+
+    real = Path.read_text
+
+    def deny(self, *args, **kwargs):
+        if self == locked:
+            raise PermissionError(f"simulated unreadable file: {self}")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny)
+    result = cli.invoke(
+        "extract", "some-item-id", "--schema", str(locked), "--json", env=AUTH_ENV
+    )
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error"] == "bad_schema"
+
+
+def test_a_non_utf8_schema_file_is_a_structured_usage_error(cli, tmp_path):
+    # read_text raises UnicodeDecodeError, not OSError — it must exit
+    # through the same structured path, never a raw traceback (#143).
+    binary = tmp_path / "binary-schema.json"
+    binary.write_bytes(b"\xff\xfe\x00\x01 not utf-8")
+    result = cli.invoke(
+        "extract", "some-item-id", "--schema", str(binary), "--json", env=AUTH_ENV
+    )
     assert result.exit_code == 2
     assert json.loads(result.stdout)["error"] == "bad_schema"
 

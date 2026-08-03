@@ -87,7 +87,10 @@ def _load_schema(spec: str, *, as_json: bool) -> dict:
     if is_file:
         try:
             text = path.read_text(encoding="utf-8")
-        except OSError as error:
+        except (OSError, UnicodeError) as error:
+            # OSError: permissions and friends; UnicodeError: the file
+            # exists but is not UTF-8 text — both are "not a readable
+            # schema file", and both must exit structured (#143).
             exit_with(
                 {
                     "error": "bad_schema",
