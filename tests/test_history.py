@@ -163,8 +163,60 @@ def test_referencing_extract_renders_as_an_indented_child_row(
     assert lines.index(child_line) == lines.index(parse_line) + 1
 
 
-# A survey-style schema: many fields, names longer than any column can
-# afford — the shape that blew up listings before the params cap (#144).
+def test_params_show_a_field_count_never_the_schema_field_names(
+    cli, document, schema_file
+):
+    """A big schema used to drown every other column (#134-style listing
+    rot): the human params cell says how many fields, not which — the full
+    list stays in --json and the record's ``fields``."""
+    parse_id = parse_file(cli, document)
+    extract_id = extract_item(cli, parse_id, schema_file)
+
+    human = cli.invoke("history", "list")
+    assert "2 fields" in human.stdout
+    assert "total, vendor" not in human.stdout
+    assert "extract-latest" in human.stdout  # the model still renders
+
+    # The sidebar read model shares the same compact rendering.
+    cli.invoke("history", "list", "--json")
+    by_id = {item["id"]: item for item in history_js_items(cli)}
+    assert by_id[extract_id]["params"] == "extract-latest · 2 fields"
+
+    # And the machine payload keeps the exact field list.
+    result = cli.invoke("history", "list", "--json")
+    records = {r["job_item_id"]: r for r in json.loads(result.stdout)}
+    assert records[extract_id]["fields"] == ["total", "vendor"]
+
+
+@pytest.mark.parametrize("columns", ["120", "80"])
+def test_history_table_keeps_every_column_inside_the_terminal(
+    cli, document, schema_file, columns
+):
+    """The TTY table never lets one column push another off-screen: all
+    six headers render, ids stay whole, child rows carry the tree marker,
+    and no line exceeds the terminal width."""
+    parse_id = parse_file(cli, document)
+    extract_id = extract_item(cli, parse_id, schema_file)
+    cli.stdout_tty = True
+
+    result = cli.invoke("history", "list", env={"COLUMNS": columns})
+
+    assert result.exit_code == 0
+    lines = result.stdout.splitlines()
+    header = lines[0]
+    for name in ("JOB ITEM", "KIND", "STATE", "ENV", "PARAMS", "SOURCE"):
+        assert name in header
+    assert all(len(line) <= int(columns) for line in lines)
+    # Identity columns never crop, whatever the width.
+    assert any(line.startswith(parse_id) for line in lines)
+    assert any(line.startswith(f"└ {extract_id}") for line in lines)
+    assert "extract " in result.stdout  # KIND never crops to "extra…"
+    assert "extracted" in result.stdout
+    assert "production" in result.stdout
+
+
+# The reported #144 shape: a survey-style schema — 39 fields, names longer
+# than any column can afford — the store contents that blew up listings.
 WIDE_FIELDS = ["member_info"] + [
     f"question_{i:02d}_in_the_past_6_months_how_many_times_did_you_do_this"
     for i in range(1, 39)
@@ -185,49 +237,34 @@ def wide_schema_file(tmp_path):
     return path
 
 
-def test_wide_schema_extract_params_are_capped_in_plain_lines_and_sidebar(
+def test_wide_schema_extract_rows_stay_bounded_everywhere(
     cli, document, wide_schema_file
 ):
     parse_id = parse_file(cli, document)
     extract_id = extract_item(cli, parse_id, wide_schema_file)
 
+    # Piped plain lines: the count, never the 39 names.
     human = cli.invoke("history", "list")
     (line,) = [ln for ln in human.stdout.splitlines() if extract_id in ln]
-    # First fields named (clipped), the rest folded — never all 39.
-    assert "member_info" in line
-    assert "+36 more" in line
+    assert "39 fields" in line
+    assert "member_info" not in line
     assert "extract-latest" in line
-    assert "question_04" not in line
 
-    # The sidebar shares the same rendering, so it inherits the cap.
+    # The sidebar read model shares the rendering; --json keeps the list.
     (entry,) = [i for i in history_js_items(cli) if i["id"] == extract_id]
-    assert "+36 more" in entry["params"]
-    # --json keeps the full field list; the cap is display-only.
+    assert entry["params"] == "extract-latest · 39 fields"
     listed = cli.invoke("history", "list", "--json")
     records = {r["job_item_id"]: r for r in json.loads(listed.stdout)}
     assert records[extract_id]["fields"] == WIDE_FIELDS
 
-
-def test_wide_schema_table_truncates_params_never_the_identity_columns(
-    cli, document, wide_schema_file
-):
-    parse_id = parse_file(cli, document)
-    extract_id = extract_item(cli, parse_id, wide_schema_file)
-
+    # And the TTY table still fits the terminal with ids un-cropped.
     cli.stdout_tty = True
-    result = cli.invoke("history", "list", env={"COLUMNS": "100"})
-
-    assert result.exit_code == 0
-    # Headers render whole — a crushed table showed "JOB IT…" (#144).
-    assert "JOB ITEM" in result.stdout
-    assert "SOURCE" in result.stdout
-    # The ids survive whole and SOURCE keeps its floor; PARAMS is what
-    # yields (its cell crops, the folded tail never renders).
-    assert parse_id in result.stdout
-    assert extract_id in result.stdout
-    assert "invoice" in result.stdout
-    assert "+36 more" not in result.stdout  # cropped before the fold
-    assert "question_03" not in result.stdout
+    table = cli.invoke("history", "list", env={"COLUMNS": "100"})
+    assert table.exit_code == 0
+    lines = table.stdout.splitlines()
+    assert all(len(ln) <= 100 for ln in lines)
+    assert any(ln.startswith(parse_id) for ln in lines)
+    assert any(ln.startswith(f"└ {extract_id}") for ln in lines)
 
 
 def test_history_states_derive_from_tickets_zero_api_calls(cli, tmp_path):
