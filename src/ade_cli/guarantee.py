@@ -29,6 +29,7 @@ from typing import Callable, Iterator, NoReturn
 import httpx
 import typer
 
+from . import update
 from .config import DEFAULT_ENVIRONMENT
 from .gateway import GatewayError
 from .oauth import ReloginRequired
@@ -484,6 +485,11 @@ class Guarantee:
         # named, never a bare status line.
         label = f"{error.code}: " if error.code else ""
         human = f"HTTP {error.status_code}: {label}{error.detail}"
+        # A registry-style "unknown model" rejection usually means the API
+        # moved past this CLI build (#138) — say so, in both renderings.
+        hint = update.unknown_model_hint(error.detail)
+        if hint:
+            human = f"{human} {hint}"
         if error.status_code == 401 and not isinstance(error, ReloginRequired):
             # One canonical line for every rejected credential (#117): the
             # platform's 401 bodies vary by which check rejected the key
@@ -508,6 +514,7 @@ class Guarantee:
                 "status_code": error.status_code,
                 "code": error.code,
                 "message": error.detail,
+                **({"hint": hint} if hint else {}),
                 **self.context,
             },
             human,

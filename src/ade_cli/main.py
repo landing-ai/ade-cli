@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from importlib.metadata import version as _installed_version
-
 import typer
 
 from .auth import auth_app, login, logout
@@ -16,6 +14,7 @@ from .output import JSON_FLAG, emit, set_id_only
 from .parse import parse
 from .ports import Ports
 from .telemetry import LedgerGroup
+from .update import current_version, install_mode, update
 from .view import view
 
 app = typer.Typer(
@@ -56,6 +55,7 @@ app.command()(extract)
 app.command()(find)
 app.command()(view)
 app.command()(crop)
+app.command()(update)
 app.command("help")(help_command)
 
 
@@ -71,6 +71,14 @@ def _root(ctx: typer.Context) -> None:
 
 @app.command()
 def version(as_json: bool = JSON_FLAG) -> None:
-    """Print the ade version."""
-    v = _installed_version("ade-cli")
-    emit({"version": v}, f"ade {v}", as_json=as_json)
+    """Print the ade version and install mode: 'binary' (the standalone
+    app — `ade update` replaces it in place) or 'python' (uv/pipx —
+    upgrade with `uv tool upgrade ade-cli`)."""
+    v = current_version()
+    mode = install_mode()
+    label = "standalone binary" if mode == "binary" else "python environment"
+    emit(
+        {"version": v, "install": mode},
+        f"ade {v} ({label})",
+        as_json=as_json,
+    )

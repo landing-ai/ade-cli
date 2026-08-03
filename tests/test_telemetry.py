@@ -53,6 +53,7 @@ def test_the_walked_tree_matches_the_expected_commands():
             ("login",),
             ("logout",),
             ("parse",),
+            ("update",),
             ("version",),
             ("view",),
         ]

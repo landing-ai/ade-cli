@@ -52,6 +52,7 @@ BANDS: list[tuple[str, list[str]]] = [
             "login",
             "logout",
             "version",
+            "update",
             "help",
         ],
     ),
@@ -312,7 +313,23 @@ RESULTS: dict[str, dict] = {
     },
     "version": {
         "shape": "object",
-        "keys": [("version", "the installed ade version")],
+        "keys": [
+            ("version", "the installed ade version"),
+            ("install", "how it is installed: binary (standalone app, "
+             "self-updates via `ade update`) | python (uv/pipx — upgrade "
+             "with `uv tool upgrade ade-cli`)"),
+        ],
+    },
+    "update": {
+        "shape": "object",
+        "keys": [
+            ("current", "the running version"),
+            ("latest", "the latest released version (null when the release "
+             "channel is not visible)"),
+            ("updated", "true when this run installed the newer version"),
+            ("install", "binary | python — python installs are never "
+             "mutated, only pointed at `uv tool upgrade ade-cli`"),
+        ],
     },
     "help": {
         "shape": "object",

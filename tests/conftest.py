@@ -142,6 +142,10 @@ class Cli:
             # POST after every invocation. Flush tests opt back in with
             # env={"ADE_TELEMETRY_UPLOAD": None}.
             "ADE_TELEMETRY_UPLOAD": "0",
+            # The periodic update check (#138) stays off the same way — it
+            # would fire an unscripted GET after any stderr-tty invocation.
+            # Nudge tests opt back in with env={"ADE_NO_UPDATE_CHECK": None}.
+            "ADE_NO_UPDATE_CHECK": "1",
             "DO_NOT_TRACK": None,
         }
         merged.update(dict.fromkeys(surface.marker_variables()))

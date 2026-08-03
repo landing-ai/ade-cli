@@ -13,4 +13,9 @@ def test_version_json_emits_one_stable_object(cli):
     result = cli.invoke("version", "--json")
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout) == {"version": installed_version("ade-cli")}
+    # The install mode rides along (#138): the test runner is never the
+    # frozen binary, so the mode here is always "python".
+    assert json.loads(result.stdout) == {
+        "version": installed_version("ade-cli"),
+        "install": "python",
+    }

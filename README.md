@@ -52,6 +52,14 @@ billed parse/extract results.
 (Developing or installing from source? See
 [CONTRIBUTING.md](CONTRIBUTING.md).)
 
+Staying current is one command: `ade update` checks the release channel
+and, for a binary install, replaces the app in place after verifying the
+release checksum (`--yes` skips the confirmation). A `uv`/`pipx` install
+is never touched — `update` points at `uv tool upgrade ade-cli` instead;
+`ade version` reports which kind you have. The CLI also checks quietly
+in the background at most once a day and mentions a newer release on
+stderr; set `ADE_NO_UPDATE_CHECK=1` to turn that off.
+
 ## Auth
 
 | command | what it does |

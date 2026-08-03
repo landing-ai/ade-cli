@@ -278,6 +278,9 @@ class LedgerGroup(TyperGroup):
             # command's output and exit path are already decided, and is
             # as silent as the append above.
             _ship_after_command(self, argv, kwargs.get("obj"))
+            # Then the throttled update check (#138): same posture — after
+            # the real work, never surfaces, never raises.
+            _update_check_after_command(self, argv, kwargs.get("obj"))
 
 
 def _ship_after_command(root: object, argv: list[str], ports: object) -> None:
@@ -300,8 +303,40 @@ def _ship_after_command(root: object, argv: list[str], ports: object) -> None:
         pass
 
 
+def _update_check_after_command(root: object, argv: list[str], ports: object) -> None:
+    """Hand the post-command update check to update.py (#138): the
+    injected transport and terminal-ness when the invocation carried
+    Ports (the test seam), the real ones otherwise. Never surfaces,
+    never raises — same posture as the flush above."""
+    try:
+        from . import update
+
+        transport = getattr(ports, "transport", None)
+        if transport is None:
+            import httpx
+
+            transport = httpx.HTTPTransport()
+        stderr_is_tty = getattr(ports, "stderr_is_tty", _stderr_is_tty)()
+        command, _ = classify_argv(root, argv)
+        update.after_command(
+            command=command,
+            env=os.environ,
+            transport=transport,
+            stderr_is_tty=stderr_is_tty,
+        )
+    except BaseException:
+        pass
+
+
 def _stdout_is_tty() -> bool:
     try:
         return sys.stdout.isatty()
+    except Exception:
+        return False
+
+
+def _stderr_is_tty() -> bool:
+    try:
+        return sys.stderr.isatty()
     except Exception:
         return False

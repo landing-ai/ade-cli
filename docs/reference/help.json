@@ -297,7 +297,7 @@
     {
       "name": "version",
       "usage": "ade version [--json]",
-      "summary": "Print the ade version.",
+      "summary": "Print the ade version and install mode: 'binary' (the standalone\napp \u2014 `ade update` replaces it in place) or 'python' (uv/pipx \u2014\nupgrade with `uv tool upgrade ade-cli`).",
       "arguments": [],
       "flags": [],
       "supports_json": true,
@@ -307,6 +307,48 @@
           {
             "key": "version",
             "what": "the installed ade version"
+          },
+          {
+            "key": "install",
+            "what": "how it is installed: binary (standalone app, self-updates via `ade update`) | python (uv/pipx \u2014 upgrade with `uv tool upgrade ade-cli`)"
+          }
+        ]
+      },
+      "band": "credentials & CLI lifecycle"
+    },
+    {
+      "name": "update",
+      "usage": "ade update [options] [--json]",
+      "summary": "Check the release channel for a newer CLI and self-update on\nconfirmation. A standalone-binary install (see `ade version`)\nreplaces itself in place after verifying the release checksum; a\nuv/pipx install is never mutated \u2014 the command reports the newer\nversion and points at `uv tool upgrade ade-cli`.",
+      "arguments": [],
+      "flags": [
+        {
+          "flags": "--yes",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Install without the interactive confirmation (required when stdin is not a terminal)."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "current",
+            "what": "the running version"
+          },
+          {
+            "key": "latest",
+            "what": "the latest released version (null when the release channel is not visible)"
+          },
+          {
+            "key": "updated",
+            "what": "true when this run installed the newer version"
+          },
+          {
+            "key": "install",
+            "what": "binary | python \u2014 python installs are never mutated, only pointed at `uv tool upgrade ade-cli`"
           }
         ]
       },
