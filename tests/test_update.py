@@ -65,6 +65,26 @@ def test_update_up_to_date_reports_and_changes_nothing(cli):
     assert payload["latest"] == installed_version("ade-cli")
 
 
+def test_an_ambient_github_token_rides_on_the_version_check(cli):
+    # install.sh's posture: a GITHUB_TOKEN/GH_TOKEN in the environment is
+    # used, never stored — it lifts the anonymous API rate limit and
+    # covers the private-repo window.
+    script_latest(cli, "v99.0.0")
+
+    result = cli.invoke(
+        "update", "--json", env={"GITHUB_TOKEN": "ghp_test_token"}
+    )
+
+    assert result.exit_code == 0
+    (request,) = cli.transport.requests
+    assert request.headers["Authorization"] == "Bearer ghp_test_token"
+
+    script_latest(cli, "v99.0.0")
+    bare = cli.invoke("update", "--json", env={"GITHUB_TOKEN": None, "GH_TOKEN": None})
+    assert bare.exit_code == 0
+    assert "Authorization" not in cli.transport.requests[-1].headers
+
+
 def test_update_skips_silently_when_the_release_channel_is_not_visible(cli):
     # 404 is what the unauthenticated API answers while the repo is
     # private (or has no release yet): nothing to compare, not a failure.

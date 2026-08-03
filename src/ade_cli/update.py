@@ -118,13 +118,20 @@ def fetch_latest(
     """The latest release's version (tag without the ``v``), or None when
     the channel is unavailable in the way that means "skip silently":
     404/403 is what the unauthenticated API answers while the repo is
-    private (or has no release yet). Anything else — network failure, an
-    unexpected status, a malformed body — raises UpdateCheckError."""
+    private (or has no release yet), and 403 is also its anonymous
+    rate-limit answer. An ambient GITHUB_TOKEN/GH_TOKEN rides along when
+    present — the same posture as install.sh, never stored. Anything
+    else — network failure, an unexpected status, a malformed body —
+    raises UpdateCheckError."""
+    headers = {"Accept": "application/vnd.github+json"}
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     try:
         with httpx.Client(transport=transport, timeout=timeout) as client:
             response = client.get(
                 RELEASES_LATEST_URL,
-                headers={"Accept": "application/vnd.github+json"},
+                headers=headers,
                 follow_redirects=True,
             )
     except httpx.HTTPError as error:
