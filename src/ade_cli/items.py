@@ -149,7 +149,11 @@ def item_record(store: JobStore, item_id: str) -> dict:
         record["page_count"] = current.get("page_count")
         record["failed_pages"] = current.get("failed_pages")
     else:
-        record["fields"] = sorted((meta.get("schema") or {}).get("properties") or [])
+        # None when the commit record carries no schema yet (pending items,
+        # pre-field records) — distinct from a schema whose properties are
+        # genuinely empty, which reads as [] and counts as "0 fields".
+        properties = (meta.get("schema") or {}).get("properties")
+        record["fields"] = sorted(properties) if properties is not None else None
         # The partial-success markers (#118): the violation message and the
         # server-warning count — read from the commit record, so listings
         # can say so without opening extract.json (which keeps the full
@@ -298,8 +302,10 @@ def compact_params(record: dict) -> str:
             parts.append(params["tier"])
         return " · ".join(parts)
     parts = [params.get("model") or "?"]
-    fields = record.get("fields") or []
-    if fields:
+    fields = record.get("fields")
+    if fields is not None:
+        # [] is a real (if odd) schema — "0 fields" — while None means
+        # the item has no schema metadata to count (nothing rendered).
         plural = "s" if len(fields) != 1 else ""
         parts.append(f"{len(fields)} field{plural}")
     return " · ".join(parts)

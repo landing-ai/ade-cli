@@ -167,9 +167,9 @@ def test_referencing_extract_renders_as_an_indented_child_row(
 def test_params_show_a_field_count_never_the_schema_field_names(
     cli, document, schema_file
 ):
-    """A big schema used to drown every other column (#134-style listing
-    rot): the human params cell says how many fields, not which — the full
-    list stays in --json and the record's ``fields``."""
+    """A big schema used to drown every other column (#144): the human
+    params cell says how many fields, not which — the full list stays in
+    --json and the record's ``fields``."""
     parse_id = parse_file(cli, document)
     extract_id = extract_item(cli, parse_id, schema_file)
 
@@ -187,6 +187,38 @@ def test_params_show_a_field_count_never_the_schema_field_names(
     result = cli.invoke("history", "list", "--json")
     records = {r["job_item_id"]: r for r in json.loads(result.stdout)}
     assert records[extract_id]["fields"] == ["total", "vendor"]
+
+
+def test_an_empty_schema_counts_zero_fields_and_no_metadata_counts_nothing(
+    cli, document, tmp_path
+):
+    parse_id = parse_file(cli, document)
+    empty = tmp_path / "empty-schema.json"
+    empty.write_text(json.dumps({"type": "object", "properties": {}}))
+    extract_id = extract_item(cli, parse_id, empty)
+    # A pending extract has no commit record yet — nothing to count.
+    cli.transport.respond(202, {"job_id": "extract-0002"})
+    other = tmp_path / "other-schema.json"
+    other.write_text(
+        json.dumps({"type": "object", "properties": {"total": {"type": "string"}}})
+    )
+    pending = cli.invoke(
+        "extract", parse_id, "--schema", str(other), "--wait", "0", "--json",
+        env=AUTH_ENV,
+    )
+    assert pending.exit_code == 3
+    pending_id = json.loads(pending.stdout)["job_item_id"]
+
+    human = cli.invoke("history", "list")
+    (empty_line,) = [ln for ln in human.stdout.splitlines() if extract_id in ln]
+    assert "0 fields" in empty_line  # a real (if odd) schema counts
+    (pending_line,) = [ln for ln in human.stdout.splitlines() if pending_id in ln]
+    assert "fields" not in pending_line  # no schema metadata, no claim
+
+    listed = cli.invoke("history", "list", "--json")
+    records = {r["job_item_id"]: r for r in json.loads(listed.stdout)}
+    assert records[extract_id]["fields"] == []
+    assert records[pending_id]["fields"] is None
 
 
 @pytest.mark.parametrize("columns", ["120", "80"])

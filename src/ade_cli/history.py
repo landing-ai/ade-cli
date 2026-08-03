@@ -174,15 +174,11 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
         ]
         for record, indent in rows
     ]
-    zone = _zone_label()
-    headers = [
-        "JOB ITEM",
-        "KIND",
-        "STATE",
-        "ENV",
-        f"SUBMITTED ({zone})" if zone else "SUBMITTED",
-        "PARAMS",
-    ]
+    # "(local)" rather than today's zone abbreviation: each row converts
+    # its own epoch with the zone rules in effect *then*, so one history
+    # can legitimately span DST names — a current-time label would
+    # mislabel half of it.
+    headers = ["JOB ITEM", "KIND", "STATE", "ENV", "SUBMITTED (local)", "PARAMS"]
     widths = [
         max(len(header), *(len(row[i]) for row in cells))
         for i, header in enumerate(headers)
@@ -211,10 +207,10 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
         max(12, console.width - sum(widths[:last]) - overhead - 12),
     )
     # A cell that overflows the column swaps to its elided form (model and
-    # tier intact) when that fits; folding below remains only for a
-    # terminal too narrow even for the elided form.
+    # tier intact) — even when the elided form itself must fold, folding
+    # the bounded model/…/tier beats folding a long pages list.
     for row, short in zip(cells, elided):
-        if len(row[last]) > widths[last] >= len(short):
+        if len(row[last]) > widths[last]:
             row[last] = short
     table = Table(box=box.SIMPLE, show_edge=False, pad_edge=False, header_style="bold")
     for header, width_ in zip(headers[:last], widths[:last]):
@@ -277,27 +273,14 @@ def _render_table(jobs: store.JobStore, rows: list[tuple[dict, bool]]) -> None:
 
 
 def _submitted_cell(record: dict) -> str:
-    """The compact submission time, in this machine's local zone (the
-    table header names the zone once) — listings are read where the runs
-    happened. Items predating the field read as "?"; the raw epoch stays
-    in --json (``submitted_at``)."""
+    """The compact submission time, in this machine's local zone with the
+    rules in effect at that epoch (DST included) — listings are read
+    where the runs happened. Items predating the field read as "?"; the
+    raw epoch stays in --json (``submitted_at``)."""
     epoch = record.get("submitted_at")
     if epoch is None:
         return "?"
     return datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M")
-
-
-def _zone_label() -> str:
-    """The local zone for the table header: the platform's abbreviation
-    ("PST", "CEST") when it has a short one, the numeric offset
-    ("+08:00") when the name is missing or long (Windows spells out
-    localized full names), empty only if both fail."""
-    now = datetime.now().astimezone()
-    name = now.strftime("%Z")
-    if name and len(name) <= 5:
-        return name
-    offset = now.strftime("%z")
-    return f"{offset[:3]}:{offset[3:]}" if offset else ""
 
 
 def _overhead(columns: int) -> int:
