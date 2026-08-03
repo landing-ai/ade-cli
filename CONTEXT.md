@@ -105,7 +105,7 @@ way. OAuth logins verify themselves through the token exchange.
 _Avoid_: validation against a dedicated auth route (none exists in the v2 contract)
 
 **Provider**:
-The per-environment Logto coordinates the browser login runs against: issuer (`login.*`, never the `logto.*` admin portal), client id, and the RFC 8707 resource indicator (the token audience — the environment's API endpoint). Defaults are data; `config.json`'s `oauth.<environment>` block overrides field by field. Browser login ships dark at launch behind `ADE_OAUTH=1` (ADR-0004) — the platform has not deployed OAuth authz to production/eu.
+The per-environment Logto coordinates the browser login runs against: issuer (`login.*`, never the `logto.*` admin portal), client id, and the RFC 8707 resource indicator (the token audience — the environment's API endpoint). Defaults are data; `config.json`'s `oauth.<environment>` block overrides field by field. Browser login is a public login method (ADR-0008; ADR-0004's launch gate is deleted now that the platform accepts OIDC tokens).
 
 **OAuth session**:
 The refreshable browser-login credential for one environment: access + refresh tokens, identity, expiry. Access tokens refresh silently near expiry or once after a 401; refresh tokens rotate on every use, so refresh holds a cross-process lock and re-reads before spending one.

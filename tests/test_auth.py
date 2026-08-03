@@ -657,7 +657,7 @@ def test_arrow_menu_enter_alone_continues_with_api_key(cli):
         "auth", "login", "--json",
         input=KEY + "\n",
         keys=["\r"],
-        env={"TERM": "xterm-256color", "ADE_OAUTH": "1"},
+        env={"TERM": "xterm-256color"},
     )
 
     assert result.exit_code == 0, result.output
@@ -679,7 +679,7 @@ def test_arrow_menu_falls_back_to_typed_when_raw_mode_fails(cli):
         "auth", "login", "--json",
         input="1\n" + KEY + "\n",
         keys=[OSError("stdin has no raw mode")],
-        env={"TERM": "xterm-256color", "ADE_OAUTH": "1"},
+        env={"TERM": "xterm-256color"},
     )
 
     assert result.exit_code == 0, result.output
@@ -698,7 +698,7 @@ def test_dumb_terminal_skips_the_arrow_selector(cli):
     result = cli.invoke(
         "auth", "login", "--json",
         input="\n" + KEY + "\n",
-        env={"TERM": "dumb", "ADE_OAUTH": "1"},
+        env={"TERM": "dumb"},
     )
 
     assert result.exit_code == 0, result.output
@@ -713,8 +713,7 @@ def test_tty_login_menus_and_defaults_to_api_key(cli):
     # else is asked.
     cli.transport.respond(200, {"accepted": 0})
     result = cli.invoke(
-        "auth", "login", "--json", input="\n" + KEY + "\n",
-        env={"ADE_OAUTH": "1"},
+        "auth", "login", "--json", input="\n" + KEY + "\n"
     )
 
     assert result.exit_code == 0, result.output
@@ -735,8 +734,7 @@ def test_tty_menu_api_key_branch_targets_production_without_asking(cli):
 
     cli.transport.respond(200, {"accepted": 0})
     result = cli.invoke(
-        "auth", "login", "--json", input="1\n" + KEY + "\n",
-        env={"ADE_OAUTH": "1"},
+        "auth", "login", "--json", input="1\n" + KEY + "\n"
     )
 
     assert result.exit_code == 0, result.output
@@ -752,8 +750,7 @@ def test_tty_menu_env_flag_skips_the_environment_prompt(cli):
 
     cli.transport.respond(200, {"accepted": 0})
     result = cli.invoke(
-        "auth", "login", "--env", "eu", "--json", input="1\n" + KEY + "\n",
-        env={"ADE_OAUTH": "1"},
+        "auth", "login", "--env", "eu", "--json", input="1\n" + KEY + "\n"
     )
 
     assert result.exit_code == 0, result.output
@@ -781,8 +778,7 @@ def test_tty_menu_reprompts_on_an_unknown_choice(cli):
 
     cli.transport.respond(200, {"accepted": 0})
     result = cli.invoke(
-        "auth", "login", "--json", input="x\n1\n" + KEY + "\n",
-        env={"ADE_OAUTH": "1"},
+        "auth", "login", "--json", input="x\n1\n" + KEY + "\n"
     )
 
     assert result.exit_code == 0, result.output
@@ -791,36 +787,15 @@ def test_tty_menu_reprompts_on_an_unknown_choice(cli):
     assert payload["method"] == "api_key"
 
 
-def test_login_without_flag_prompts_for_key_directly_when_oauth_is_dark(cli):
-    # ADR-0004: with the launch gate closed there is no method menu —
-    # flagless login on a terminal is the hidden key prompt alone, with
-    # no mention of a browser option to advertise.
-    cli.stderr_tty = True
-    cli.stdin_tty = True
-
-    cli.transport.respond(200, {"accepted": 0})
-    result = cli.invoke("auth", "login", "--json", input=KEY + "\n")
-
-    assert result.exit_code == 0, result.output
-    assert "How would you like to log in?" not in result.stderr
-    assert "browser" not in result.stderr.lower()
-    # --json means exactly one JSON object on stdout — parse all of it.
-    payload = json.loads(result.stdout)
-    assert payload["method"] == "api_key"
-    creds = json.loads(credentials_file(cli).read_text())["environments"]
-    assert creds["production"]["api_key"] == KEY
-
-
-def test_non_tty_login_without_key_names_the_api_key_remediation(cli):
-    # ADR-0004: pre-gate, a non-terminal flagless login jumped straight
-    # into the browser flow; dark, it must fail with the --api-key /
-    # ADE_API_KEY remediation instead of starting one.
-    result = cli.invoke("auth", "login", "--json")
+def test_non_tty_login_without_key_falls_to_browser_and_names_the_key_remediation(cli):
+    # ADR-0008: a non-terminal flagless login with no piped key goes
+    # straight into the browser flow; where no browser can open, the
+    # failure names the headless spellings (--api-key / ADE_API_KEY).
+    result = cli.invoke("auth", "login", "--json", browser=lambda _url: False)
 
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
-    assert payload["error"] == "no_credential"
-    assert payload["environment"] == "production"
+    assert payload["error"] == "no_browser"
     # --json emits only the payload, so the remediation must be in it.
     assert "--api-key" in payload["message"]
     assert "ADE_API_KEY" in payload["message"]
@@ -856,12 +831,15 @@ def test_headless_login_honors_the_resolved_environment(cli):
 
 
 def test_headless_login_with_empty_stdin_still_names_the_remediation(cli):
-    """An empty pipe is not a key: the honest error, not a stored blank."""
-    result = cli.invoke("auth", "login", "--json", input="\n")
+    """An empty pipe is not a key: the browser fallback's failure names
+    the headless spellings, and nothing blank is stored."""
+    result = cli.invoke(
+        "auth", "login", "--json", input="\n", browser=lambda _url: False
+    )
 
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
-    assert payload["error"] == "no_credential"
+    assert payload["error"] == "no_browser"
     assert "ADE_API_KEY" in payload["message"]
     assert not credentials_file(cli).exists()
 
@@ -869,7 +847,11 @@ def test_headless_login_with_empty_stdin_still_names_the_remediation(cli):
 def test_headless_login_remediation_names_the_pipe(cli):
     """The escape hatches are discoverable before the failure, but the
     error must still list all of them — including the piped form."""
-    payload = json.loads(cli.invoke("auth", "login", "--json").stdout)
+    payload = json.loads(
+        cli.invoke(
+            "auth", "login", "--json", browser=lambda _url: False
+        ).stdout
+    )
 
     assert "echo $KEY | ade auth login" in payload["message"]
     assert "--api-key" in payload["message"]

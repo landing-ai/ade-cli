@@ -56,7 +56,7 @@ billed parse/extract results.
 
 | command | what it does |
 |---|---|
-| `ade auth login` | prompt for an API key (hidden input) |
+| `ade auth login` | choose a method: paste an API key, or sign in with your browser (OAuth) |
 | `ade auth login --api-key KEY` | store an API key for production directly |
 | `ade auth login --api-key -` | prompt for the key (hidden input) |
 | `echo $KEY \| ade auth login` | headless: a piped key is the prompt, answered |
@@ -68,7 +68,8 @@ billed parse/extract results.
 | `ade login` | top-level alias of `ade auth login` — same flags, same behavior |
 | `ade logout` | top-level alias of `ade auth logout` — same flags, same behavior |
 
-API keys come from your
+Browser sign-in runs an OAuth flow against your LandingAI account and
+stores refreshable tokens; nothing to copy. API keys come from your
 [LandingAI account settings](https://ade.landing.ai/settings/api-key).
 `login` verifies the key against the target environment before storing
 it — a mistyped key fails right at login, not at your first `parse`.
@@ -103,7 +104,8 @@ on — CI, cron, an agent harness, a wrapped shell — set `ADE_API_KEY`, or
 pipe the key in: `echo $KEY | ade auth login` stores it for the resolved
 environment exactly as the prompt would. (`--api-key KEY` works too, but an
 inline key is visible to `ps`.) Nothing hangs waiting on an idle stdin: with
-no key available the command exits immediately, naming all three paths.
+no key available the login tries browser sign-in, and where no browser can
+open it exits immediately, naming all three paths.
 `ade help credentials` is the same page from the CLI.
 
 ## Parse

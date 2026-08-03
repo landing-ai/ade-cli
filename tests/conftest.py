@@ -110,7 +110,7 @@ class Cli:
     stderr_tty: bool = False
     stdin_tty: bool = False
     # Per-test env baseline applied after the ambient shield (a test file
-    # opts a whole suite into e.g. the ADR-0004 OAuth gate here).
+    # opts a whole suite into an env var here).
     env_defaults: dict[str, str | None] = field(default_factory=dict)
     # typer's runner keeps stderr separate: progress rendering (#33) is
     # asserted on its own stream (result.stderr), and stdout byte-stability
@@ -142,7 +142,6 @@ class Cli:
             # POST after every invocation. Flush tests opt back in with
             # env={"ADE_TELEMETRY_UPLOAD": None}.
             "ADE_TELEMETRY_UPLOAD": "0",
-            "ADE_OAUTH": None,
             "DO_NOT_TRACK": None,
         }
         merged.update(dict.fromkeys(surface.marker_variables()))

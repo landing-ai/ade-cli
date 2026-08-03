@@ -20,14 +20,6 @@ KEY = "sk-test-0123456789abcd"
 CLIENT_ID = "cli-native-test"
 
 
-@pytest.fixture(autouse=True)
-def _oauth_gate_open(cli):
-    # Every test here exercises the browser flow, which ships dark at
-    # launch (ADR-0004) — run the whole file the way an internal gate-on
-    # invocation would.
-    cli.env_defaults["ADE_OAUTH"] = "1"
-
-
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 

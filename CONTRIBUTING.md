@@ -34,8 +34,8 @@ no Python required.
 - `CONTEXT.md` — the domain glossary. Use its vocabulary in issues,
   PRs, and code; don't drift to the synonyms it explicitly avoids.
 - `docs/adr/` — decisions with their whys (e.g. ADR-0003 per-invocation
-  environments, ADR-0004 browser OAuth dark at launch behind
-  `ADE_OAUTH=1`).
+  environments, ADR-0004/ADR-0008 browser OAuth dark at launch, then
+  public).
 - `SKILL.md` + `docs/reference/help.json` — the agent contract. `help`
   is generated from the live command tree; regenerate the committed
   snapshot after any surface change:

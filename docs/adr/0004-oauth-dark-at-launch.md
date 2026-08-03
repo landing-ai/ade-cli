@@ -1,6 +1,7 @@
 # ADR-0004: Browser OAuth ships dark at launch, behind `ADE_OAUTH=1`
 
-Date: 2026-07-23 · Status: accepted
+Date: 2026-07-23 · Status: superseded by ADR-0008 (the platform
+deployed OAuth authz; the gate is deleted and browser login is public)
 
 ## Context
 

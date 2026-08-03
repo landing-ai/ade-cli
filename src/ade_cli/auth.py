@@ -19,9 +19,10 @@ key is invalid — the login fails with one canonical message and stores
 nothing, instead of deferring the discovery to the first ``parse``. Any
 other failure (5xx, unreachable network) says nothing about the key, so
 the login reports the platform problem and stores nothing.
-Browser OAuth ships dark at launch (ADR-0004): the platform has not
-deployed OAuth authz to production/eu, so the method menu (ADR-0002) and
-the non-TTY browser path exist only behind ``ADE_OAUTH=1``.
+Browser OAuth is a public login method (ADR-0008 deleted ADR-0004's
+launch gate): a terminal gets the ADR-0002 method menu, and a
+non-interactive run with no piped key falls to the browser flow, whose
+own checks diagnose a headless environment.
 
 ``logout`` de-auths one environment (the resolved target by default;
 ``--all`` clears every environment). ``status`` reports the resolved
@@ -236,9 +237,8 @@ def _login_without_key(
     """No credential flag: *ensure* logged in on the target. A stored
     credential means there is nothing to do (credentials are per
     environment; no selection exists to change). Otherwise acquire one —
-    a terminal prompts (the method menu when OAuth is live, ADR-0004);
-    non-interactive runs get the browser flow only when OAuth is live,
-    and otherwise a remediation naming ``--api-key``."""
+    a terminal prompts (the ADR-0002 method menu); a non-interactive run
+    takes a key piped on stdin, else the browser flow."""
     existing = credentials.stored_credential(home, resolved.environment)
     if existing is not None:
         _emit_already(home, resolved, existing, as_json=as_json)
@@ -252,29 +252,9 @@ def _login_without_key(
     if piped is not None:
         _finish_api_key_login(ports, home, piped, resolved, as_json=as_json)
         return
-    if _oauth_enabled():
-        # Gate open: straight to the browser flow, whose own checks
-        # diagnose misconfiguration authoritatively (client_id, resource).
-        _browser_login(ports, home, resolved, as_json=as_json)
-        return
-    # One message for both modes: the JSON payload is what agents read,
-    # so the remediation must live in it, not only in the human text.
-    human = (
-        f"No stored credential for the {resolved.environment} environment "
-        "and no terminal to prompt on. Pipe the key in "
-        "(`echo $KEY | ade auth login`), pass "
-        "`ade auth login --api-key <key>`, or set ADE_API_KEY."
-    )
-    exit_with(
-        {
-            "error": "no_credential",
-            "environment": resolved.environment,
-            "message": human,
-        },
-        human,
-        as_json=as_json,
-        code=EXIT_FAILED,
-    )
+    # Straight to the browser flow, whose own checks diagnose
+    # misconfiguration authoritatively (client_id, resource, no browser).
+    _browser_login(ports, home, resolved, as_json=as_json)
 
 
 def _acquire_interactively(
@@ -284,15 +264,14 @@ def _acquire_interactively(
     and the default — the method every target supports from day one — and
     browser OAuth is offered only when it can work for the target, so an
     API-key-only rollout (an environment with no client_id yet) collapses
-    to the key prompt alone. With OAuth dark (ADR-0004) the key prompt is
-    simply the method — no menu, no notice. The chosen flow re-checks
-    configuration authoritatively; this gate only keeps dead options out
-    of the menu."""
+    to the key prompt alone. The chosen flow re-checks configuration
+    authoritatively; this check only keeps dead options out of the
+    menu."""
     if _oauth_can_work(home, resolved):
         if _choose_method(ports) == "oauth":
             _browser_login(ports, home, resolved, as_json=as_json)
             return
-    elif _oauth_enabled():
+    else:
         typer.echo(
             "Browser sign-in isn't available for this target; use an API key.",
             err=True,
@@ -331,26 +310,12 @@ def _choose_method(ports: Ports) -> str:
         typer.echo("Choose 1 or 2.", err=True)
 
 
-# Launch gate (ADR-0004): the platform's OAuth authz is not deployed to
-# production/eu, so browser login ships dark — API keys are the only
-# public method. ADE_OAUTH=1 re-enables the browser flow (internal use
-# against environments that accept OIDC tokens). Flip-back is deleting
-# the gate once the platform deploys.
-OAUTH_GATE_ENV = "ADE_OAUTH"
-
-
-def _oauth_enabled() -> bool:
-    return os.environ.get(OAUTH_GATE_ENV) == "1"
-
-
 def _oauth_can_work(home, resolved: ResolvedConfig) -> bool:
-    """Whether the browser flow could succeed for the target: the launch
-    gate is open (ADR-0004), a client_id exists, and — under an
-    ``ADE_ENDPOINT`` override — an explicit ``resource``, since a raw URL
-    has no environment to infer the token audience from. Mirrors
-    _run_browser_flow's checks, which stay authoritative."""
-    if not _oauth_enabled():
-        return False
+    """Whether the browser flow could succeed for the target: a client_id
+    exists, and — under an ``ADE_ENDPOINT`` override — an explicit
+    ``resource``, since a raw URL has no environment to infer the token
+    audience from. Mirrors _run_browser_flow's checks, which stay
+    authoritative."""
     if not oauth.resolve_provider(home, resolved.environment).client_id:
         return False
     if resolved.endpoint_source != "env":
@@ -441,13 +406,17 @@ def _run_browser_flow(
     try:
         return oauth.login(provider, ports)
     except oauth.BrowserUnavailable:
+        # One message for both modes: the JSON payload is what agents
+        # read, so the remediation must live in it, not only in the
+        # human text.
+        human = (
+            "Could not open a browser (headless environment?). Pipe the "
+            "key in (`echo $KEY | ade auth login`), pass "
+            "`ade auth login --api-key <key>`, or set ADE_API_KEY."
+        )
         exit_with(
-            {
-                "error": "no_browser",
-                "message": "Could not open a browser for the OAuth login.",
-            },
-            "Could not open a browser (headless environment?). Use "
-            "`ade auth login --api-key <key>` or set ADE_API_KEY.",
+            {"error": "no_browser", "message": human},
+            human,
             as_json=as_json,
             code=EXIT_FAILED,
         )
