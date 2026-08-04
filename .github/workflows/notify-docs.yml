@@ -1,0 +1,32 @@
+name: Notify docs of release
+
+# Tells the docs repo (landing-ai/docs) that a release published, so its
+# update-cli-reference workflow can regenerate the hosted CLI reference
+# from this repo's docs/reference/help.json at the release tag.
+#
+# This is intentionally the whole job: one dispatch call. Everything that
+# knows how to build the docs page lives in the docs repo, which also
+# polls daily as a safety net, so a failure here (for example an expired
+# DOCS_DISPATCH_TOKEN) delays the docs by at most a day rather than
+# breaking anything.
+#
+# DOCS_DISPATCH_TOKEN is a fine-grained PAT scoped to landing-ai/docs
+# with Contents: read/write (repository_dispatch requires write access
+# to the target repo).
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Dispatch cli-released to landing-ai/docs
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_DISPATCH_TOKEN }}
+        run: |
+          gh api repos/landing-ai/docs/dispatches \
+            -f event_type=cli-released \
+            -F 'client_payload[tag]=${{ github.event.release.tag_name }}'
