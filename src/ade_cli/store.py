@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -119,11 +120,32 @@ class JobStore:
     def lock(self, item_id: str) -> Iterator[None]:
         """Interprocess mutex for this item's claim-ticket transitions (and
         live-artifact publication). flock is advisory, which suffices: every
-        mutator is this CLI. Never hold it across network calls."""
+        mutator is this CLI. Never hold it across network calls.
+
+        Acquisition retries when the directory vanishes between the mkdir
+        and the lock-file open — ``history clear`` deletes item dirs (the
+        lock file last, after release; see #160), and that window must
+        surface to a racing mutator as a clean re-acquire on a recreated
+        dir, never a FileNotFoundError crash. Bounded: two live processes
+        cannot ping-pong forever (clear deletes each dir once)."""
         d = self.item_dir(item_id)
-        d.mkdir(parents=True, exist_ok=True)
-        with exclusive(d / ".ticket.lock"):
+        for _ in range(100):
+            d.mkdir(parents=True, exist_ok=True)
+            acquired = exclusive(d / ".ticket.lock")
+            try:
+                acquired.__enter__()
+            except FileNotFoundError:
+                continue
+            break
+        else:  # pragma: no cover - would need 100 perfectly timed clears
+            raise FileNotFoundError(
+                f"could not acquire the item lock for {item_id}: the "
+                "directory kept disappearing during acquisition"
+            )
+        try:
             yield
+        finally:
+            acquired.__exit__(None, None, None)
 
     @contextmanager
     def store_lock(self) -> Iterator[None]:
@@ -173,5 +195,31 @@ def write_atomic(path: Path, text: str) -> Path:
         f".{path.name}.tmp-{os.getpid()}-{threading.get_ident()}"
     )
     tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    _replace_with_retry(tmp, path)
     return path
+
+
+# ~0.6s of total patience: enough to outlast another process's momentary
+# open of the destination, short enough that a genuinely locked file
+# (never seen in practice) still errors promptly.
+_REPLACE_ATTEMPTS = 10
+
+
+def _replace_with_retry(tmp: Path, path: Path) -> None:
+    """``os.replace``, retried briefly with backoff on PermissionError
+    (#162). On Windows, MoveFileEx fails with ERROR_ACCESS_DENIED while
+    the destination is momentarily open in another process without
+    share-delete access — and every ade invocation rewrites the same
+    ``history.js``, so two concurrent invocations race on exactly this
+    call. The condition is transient by nature; tens of milliseconds of
+    backoff clears it. POSIX renames never fail this way, so the retry
+    path is Windows-only in practice."""
+    delay = 0.01
+    for _ in range(_REPLACE_ATTEMPTS - 1):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(delay)
+            delay = min(delay * 2, 0.1)
+    os.replace(tmp, path)

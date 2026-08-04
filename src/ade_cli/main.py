@@ -80,6 +80,34 @@ class AdeGroup(LedgerGroup):
             raise SystemExit(EXIT_USAGE)
 
 
+def _force_utf8_stdio() -> None:
+    """Reconfigure stdout/stderr to UTF-8 (#161). With no real console
+    attached anywhere in the process chain (headless automation on
+    Windows), Python encodes stdout with the locale codepage — cp1252
+    cannot represent the help topics' box-drawing characters, so the
+    *write itself* raises UnicodeEncodeError. UTF-8 with a replace
+    handler removes the whole failure class regardless of console
+    attachment or system codepage (and makes piped output valid UTF-8);
+    interactive consoles on modern Python already speak UTF-8, so this
+    is a no-op there. Streams without ``reconfigure`` (the test runner's
+    captures, exotic embedders) are left alone."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            encoding = (getattr(stream, "encoding", None) or "").lower()
+            if encoding.replace("-", "").replace("_", "") != "utf8":
+                reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass  # a stream that cannot reconfigure must not kill startup
+
+
+# At import, not per command: the module is only imported to run the CLI
+# (console script, `python -m ade_cli`, and the frozen binary all land
+# here), and help text can print before any callback runs.
+_force_utf8_stdio()
+
 app = typer.Typer(
     name="ade",
     cls=AdeGroup,
