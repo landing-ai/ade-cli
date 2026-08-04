@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from datetime import datetime
+from pathlib import Path
 
 import typer
 
@@ -367,5 +369,39 @@ def _remove_item_dir(jobs: store.JobStore, item_id: str) -> None:
     # racing a mid-write mutator. A guarantee still polling after this
     # survives the sweep — its publication gate (ticket-owns-the-slot) reads
     # the emptied slot and declines to re-persist.
+    #
+    # The lock file itself is deleted only AFTER the lock is released
+    # (#160): holding the lock keeps an open handle on .ticket.lock, and
+    # Windows refuses to unlink a file with an open handle (WinError 32) —
+    # POSIX merely keeps the inode alive, which is why this only crashed
+    # there. Emptied down to its lock file, the directory is a husk (no
+    # ticket, no metadata) that every scan already ignores, so the
+    # in-between state is invisible.
+    item_dir = jobs.item_dir(item_id)
     with jobs.lock(item_id):
-        shutil.rmtree(jobs.item_dir(item_id))
+        for entry in item_dir.iterdir():
+            if entry.name == ".ticket.lock":
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+    _remove_husk(item_dir)
+
+
+def _remove_husk(item_dir: Path) -> None:
+    """Delete the emptied item directory and its lock file, with a short
+    retry: a process that was blocked in ``lock()`` still holds its own
+    handle on the lock file for an instant after our release, and Windows
+    refuses the unlink while it does. A husk that outlives the retries is
+    left behind deliberately — it is invisible to listings (no ticket, no
+    metadata) and the next ``history clear --all`` sweeps it."""
+    delay = 0.01
+    for _ in range(10):
+        try:
+            (item_dir / ".ticket.lock").unlink(missing_ok=True)
+            item_dir.rmdir()
+            return
+        except OSError:
+            time.sleep(delay)
+            delay = min(delay * 2, 0.1)

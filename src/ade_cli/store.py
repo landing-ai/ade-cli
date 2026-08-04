@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -173,5 +174,31 @@ def write_atomic(path: Path, text: str) -> Path:
         f".{path.name}.tmp-{os.getpid()}-{threading.get_ident()}"
     )
     tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    _replace_with_retry(tmp, path)
     return path
+
+
+# ~0.6s of total patience: enough to outlast another process's momentary
+# open of the destination, short enough that a genuinely locked file
+# (never seen in practice) still errors promptly.
+_REPLACE_ATTEMPTS = 10
+
+
+def _replace_with_retry(tmp: Path, path: Path) -> None:
+    """``os.replace``, retried briefly with backoff on PermissionError
+    (#162). On Windows, MoveFileEx fails with ERROR_ACCESS_DENIED while
+    the destination is momentarily open in another process without
+    share-delete access — and every ade invocation rewrites the same
+    ``history.js``, so two concurrent invocations race on exactly this
+    call. The condition is transient by nature; tens of milliseconds of
+    backoff clears it. POSIX renames never fail this way, so the retry
+    path is Windows-only in practice."""
+    delay = 0.01
+    for _ in range(_REPLACE_ATTEMPTS - 1):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(delay)
+            delay = min(delay * 2, 0.1)
+    os.replace(tmp, path)
