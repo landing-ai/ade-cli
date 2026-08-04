@@ -727,3 +727,25 @@ def test_stale_clears_once_the_extract_is_rerun(cli, document, schema_file):
     assert items[extract_id]["stale"] is False
     human = cli.invoke("history", "list")
     assert "(stale)" not in human.stdout
+
+
+def test_extract_record_parse_linkage_uses_run_terminology(
+    cli, document, schema_file
+):
+    """#153 reaches the linkage too: the record's `parse` block says
+    run_id (which parse generation the extraction ran against), while the
+    on-disk parse/ref.json keeps the wire spelling."""
+    parse_id = parse_file(cli, document)
+    extract_id = extract_item(cli, parse_id, schema_file)
+
+    listed = cli.invoke("history", "list", "--json")
+    records = {r["job_item_id"]: r for r in json.loads(listed.stdout)}
+    assert records[extract_id]["parse"] == {
+        "job_item_id": parse_id,
+        "run_id": "job-0001",
+        "missing": False,
+    }
+    ref = json.loads(
+        (cli.home / "jobs" / extract_id / "parse/ref.json").read_text()
+    )
+    assert ref == {"job_item_id": parse_id, "parse_job_id": "job-0001"}

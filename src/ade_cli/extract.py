@@ -121,17 +121,36 @@ def _load_schema(spec: str, *, as_json: bool) -> dict:
     return schema
 
 
+def _has_extractable_fields(schema: object) -> bool:
+    """Whether a schema defines anything an extraction could produce:
+    non-empty ``properties``/``patternProperties`` anywhere reachable
+    through local composition (``allOf``/``anyOf``/``oneOf``/``items``).
+    A ``$ref`` passes — it may point at real fields the CLI cannot
+    resolve locally, and a false block would be worse than a billed
+    empty run. Empty composition shells (``{"allOf": []}``,
+    ``{"items": {}}``) define nothing and do not pass."""
+    if not isinstance(schema, dict):
+        return False
+    if schema.get("properties") or schema.get("patternProperties"):
+        return True
+    if schema.get("$ref"):
+        return True
+    items = schema.get("items")
+    branches = items if isinstance(items, list) else [items]
+    for key in ("allOf", "anyOf", "oneOf"):
+        value = schema.get(key)
+        if isinstance(value, list):
+            branches = [*branches, *value]
+    return any(_has_extractable_fields(branch) for branch in branches)
+
+
 def _require_extractable_schema(schema: dict, *, as_json: bool) -> None:
     """Refuse a schema with nothing to extract *before* any billable step
     (the same local-validation posture as the --pages/--options conflict):
     an empty ``properties`` map is valid JSON Schema, but the server still
     processes the whole document with the LLM and bills for it while
     returning zero fields."""
-    composes = any(
-        key in schema
-        for key in ("allOf", "anyOf", "oneOf", "$ref", "patternProperties", "items")
-    )
-    if schema.get("properties") or composes:
+    if _has_extractable_fields(schema):
         return
     message = (
         "The schema defines no fields to extract (empty or missing "

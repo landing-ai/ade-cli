@@ -768,7 +768,7 @@
           },
           {
             "key": "parse",
-            "what": "extract items: the referenced parse (and whether it is missing)"
+            "what": "extract items: the referenced parse \u2014 {job_item_id, run_id (the parse generation extracted against), missing}"
           },
           {
             "key": "stale",

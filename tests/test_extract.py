@@ -642,22 +642,58 @@ def test_an_empty_schema_is_refused_before_any_api_call(cli, document):
     assert extract_posts(cli) == []
 
 
-def test_a_composing_schema_without_top_level_properties_still_submits(
-    cli, document
+@pytest.mark.parametrize(
+    "schema",
+    [
+        # Composition with real fields somewhere reachable must submit —
+        # a false block would be worse than a billed empty run.
+        {"type": "object", "allOf": [{"properties": {"total": {"type": "string"}}}]},
+        {"type": "object", "anyOf": [{}, {"properties": {"total": {"type": "string"}}}]},
+        {"type": "array", "items": {"properties": {"total": {"type": "string"}}}},
+        {"type": "object", "patternProperties": {"^x-": {"type": "string"}}},
+        # $ref is unresolvable locally: give the server the benefit.
+        {"$ref": "#/$defs/invoice", "$defs": {"invoice": {"properties": {}}}},
+    ],
+)
+def test_a_composing_schema_with_reachable_fields_still_submits(
+    cli, document, schema
 ):
     """The empty-schema gate must not false-positive on composition — a
-    $ref/allOf schema has fields even with no top-level properties map."""
+    $ref/allOf/items schema has fields even with no top-level properties
+    map."""
     parse_id = parse_doc(cli, document)
-    schema = {
-        "type": "object",
-        "allOf": [{"properties": {"total": {"type": "string"}}}],
-    }
     cli.transport.respond(202, {"job_id": "extract-0001"})
     cli.transport.respond(200, completed_extract_job())
     result = cli.invoke(
         "extract", parse_id, "--schema", json.dumps(schema), env=AUTH_ENV
     )
     assert result.exit_code == 0, result.stdout
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        # Empty composition shells define nothing — mere presence of a
+        # composition key must not bypass the gate.
+        {"type": "object", "allOf": []},
+        {"type": "object", "allOf": [{}]},
+        {"type": "object", "anyOf": [{"type": "string"}]},
+        {"type": "object", "patternProperties": {}},
+        {"type": "array", "items": {}},
+        {"type": "object", "properties": {}, "allOf": [{"properties": {}}]},
+    ],
+)
+def test_an_empty_composition_shell_is_still_refused(cli, document, schema):
+    parse_id = parse_doc(cli, document)
+    seen = len(cli.transport.requests)
+
+    result = cli.invoke(
+        "extract", parse_id, "--schema", json.dumps(schema), "--json", env=AUTH_ENV
+    )
+
+    assert result.exit_code == 2, result.stdout
+    assert json.loads(result.stdout)["error"] == "empty_schema"
+    assert len(cli.transport.requests) == seen  # nothing submitted
 
 
 # An inline schema longer than a filesystem name component (255 bytes on

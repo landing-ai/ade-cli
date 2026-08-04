@@ -262,7 +262,8 @@ RESULTS: dict[str, dict] = {
             ("run_id", "server-side run id of the recorded generation"),
             ("source", "document path, URL, or markdown file"),
             ("params", "the invocation params, verbatim"),
-            ("parse", "extract items: the referenced parse (and whether it is missing)"),
+            ("parse", "extract items: the referenced parse — {job_item_id, "
+             "run_id (the parse generation extracted against), missing}"),
             ("stale", "extract items: true when the referenced parse was "
              "--force re-run after this extraction"),
             ("created_at / completed_at", "epoch seconds (null when unknown)"),

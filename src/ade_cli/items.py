@@ -172,7 +172,17 @@ def item_record(store: JobStore, item_id: str) -> dict:
             missing = not (
                 parse_item_id and _is_item_dir(store.item_dir(parse_item_id))
             )
-            record["parse"] = {**ref, "missing": missing}
+            record["parse"] = {
+                "job_item_id": parse_item_id,
+                # The parse generation this extraction ran against, in the
+                # user-facing spelling (#153) — parse/ref.json keeps
+                # ``parse_job_id`` on disk.
+                "run_id": ref.get("parse_job_id"),
+                "missing": missing,
+                # Provenance, when recorded: a direct `extract -d` created
+                # its parse.
+                **({"direct": True} if ref.get("direct") else {}),
+            }
             # Stale (CONTEXT.md): the referenced parse was --force re-parsed
             # in place, so this extraction's spans index markdown that no
             # longer exists. Compared against the parse item's *current*
