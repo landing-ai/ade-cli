@@ -585,3 +585,14 @@ def test_view_crop_on_a_referencing_extract_renders_from_the_parse_source(
     expected = cli.home / "jobs" / extract_id / "crops" / "text-0@300dpi.png"
     assert payload["path"] == str(expected)
     assert expected.is_file()
+
+
+def test_single_crop_output_path_creates_missing_parents(cli, parsed, tmp_path):
+    item_id, _ = parsed
+    out = tmp_path / "nested" / "never-made" / "cell.png"
+
+    payload = crop_json(cli, item_id, "--element-id", "table_cell-0", "-o", str(out))
+
+    assert out.is_file()
+    assert payload["crops"][0]["path"] == str(out)
+    assert payload["directory"] == str(out.parent)

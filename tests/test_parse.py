@@ -617,3 +617,42 @@ def test_poll_backs_off_through_the_injected_clock(cli, document):
 
     assert result.exit_code == 0
     assert cli.clock.sleeps == [1.0, 1.5, 2.25, 3.375]  # x1.5 backoff
+
+
+def test_summary_and_payload_name_the_server_run_never_job(cli, document):
+    """#153: the server-side id is a *run* everywhere user-facing — the
+    summary line and the payload key — while "job" survives only inside
+    "job item". (The wire and the on-disk store still spell job_id.)"""
+    cli.transport.respond(202, {"job_id": JOB_ID})
+    cli.transport.respond(200, completed_job())
+
+    human = cli.invoke("parse", "-d", str(document), env=AUTH_ENV)
+    assert human.exit_code == 0
+    assert f"\n  run:     {JOB_ID}" in human.stdout
+    assert "job:" not in human.stdout
+    assert "job item" in human.stdout  # the local unit keeps its name
+
+    payload = json.loads(
+        cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV).stdout
+    )
+    assert payload["run_id"] == JOB_ID
+    assert "job_id" not in payload
+    # The store format is deliberately unrenamed.
+    ticket = json.loads((item_dir(cli, document) / "job.json").read_text())
+    assert ticket["job_id"] == JOB_ID
+
+
+def test_pending_payload_names_the_run_never_job(cli, document):
+    cli.transport.respond(202, {"job_id": JOB_ID})
+
+    result = cli.invoke(
+        "parse", "-d", str(document), "--wait", "0", "--json", env=AUTH_ENV
+    )
+
+    assert result.exit_code == 3
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "status": "pending",
+        "run_id": JOB_ID,
+        "job_item_id": item_dir(cli, document).name,
+    }

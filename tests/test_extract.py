@@ -900,3 +900,37 @@ def test_markdown_extraction_next_hint_never_points_at_the_viewer(cli, tmp_path)
     line = summary_next_line(result.stdout)
     assert "ade history list" in line
     assert "ade view" not in line
+
+
+def test_extract_summary_and_payload_name_the_server_run_never_job(
+    cli, document, schema_file
+):
+    """#153, extract side: `run:` in the summary, run_id in the payload,
+    "job" only inside "job item"."""
+    parse_id = parse_doc(cli, document)
+    payload = complete_extract(cli, parse_id, "--schema", str(schema_file))
+    assert payload["run_id"] == "extract-0001"
+    assert "job_id" not in payload
+
+    # The cached re-run serves the same summary shape, human mode.
+    human = cli.invoke(
+        "extract", parse_id, "--schema", str(schema_file), env=AUTH_ENV
+    )
+    assert human.exit_code == 0
+    assert "\n  run:      extract-0001" in human.stdout
+    assert "job:" not in human.stdout
+
+
+def test_empty_schema_blocks_extract_d_before_the_parse_first_phase(cli, document):
+    """#154 must gate ahead of *both* billable steps: `extract -d` on a
+    never-parsed document would otherwise run (and bill) the standalone
+    parse before the extract submit ever validated the schema."""
+    result = cli.invoke(
+        "extract", "-d", str(document),
+        "--schema", '{"type": "object", "properties": {}}',
+        "--json", env=AUTH_ENV,
+    )
+
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error"] == "empty_schema"
+    assert cli.transport.requests == []  # no parse-first, no extract, nothing

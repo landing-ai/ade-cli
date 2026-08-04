@@ -161,3 +161,45 @@ def test_id_only_keeps_click_validation_errors_off_stdout(cli):
     assert result.exit_code == 2
     assert result.stdout.strip() == ""
     assert "--schema" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("args", "code"),
+    [
+        # Every band of the tree, one Click failure mode each — the hook
+        # lives on the root group, so nested groups and every leaf must
+        # come out structured, not just the two commands QA reproduced.
+        (["parse", "-d", "/no/such/file.pdf"], "bad_parameter"),
+        (["parse", "-d", "x", "--tier", "bogus"], "bad_parameter"),
+        (["parse", "-d", "x", "--wait", "abc"], "bad_parameter"),
+        (["extract", "some-item"], "missing_option"),
+        (["view", "abc", "--dpi", "0"], "bad_parameter"),
+        (["crop", "abc", "--dpi", "0"], "bad_parameter"),
+        (["find", "abc", "--no-such-flag"], "no_such_option"),
+        (["history", "clear", "a", "b"], "usage"),
+        (["auth", "login", "--no-such-flag"], "no_such_option"),
+        (["update", "--no-such-flag"], "no_such_option"),
+        (["version", "--no-such-flag"], "no_such_option"),
+        (["no-such-command"], "usage"),
+    ],
+)
+def test_json_covers_click_validation_across_the_whole_tree(cli, args, code):
+    """#155 holds for every command, nested groups included: the hook sits
+    on the root group's make_context/invoke, which all of them run
+    through."""
+    result = cli.invoke(*args, "--json")
+
+    assert result.exit_code == 2, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["error"] == code
+    assert payload["message"]
+
+
+def test_a_literal_json_token_after_the_separator_is_data_not_a_flag(cli):
+    """`ade find ID -- --json` searches for the literal string "--json";
+    a usage error there must keep the default rendering — the invocation
+    never asked for machine output."""
+    result = cli.invoke("find", "--no-such-flag", "--", "--json")
+
+    assert result.exit_code == 2
+    assert not result.stdout.strip().startswith("{")

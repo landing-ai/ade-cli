@@ -63,11 +63,19 @@ class AdeGroup(LedgerGroup):
 
     def _structured_usage_error(self, error: UsageError) -> None:
         """Exit through the output convention when the invocation asked
-        for machine output; a plain return keeps Click's own rendering."""
-        if "--id-only" in self._argv:
+        for machine output; a plain return keeps Click's own rendering.
+        Only tokens before the ``--`` separator count — after it,
+        everything is positional data (a find query could literally be
+        the string "--json")."""
+        flags = []
+        for token in self._argv:
+            if token == "--":
+                break
+            flags.append(token)
+        if "--id-only" in flags:
             typer.echo(error.format_message(), err=True)
             raise SystemExit(EXIT_USAGE)
-        if "--json" in self._argv:
+        if "--json" in flags:
             typer.echo(json.dumps(click_usage_payload(error), indent=2))
             raise SystemExit(EXIT_USAGE)
 

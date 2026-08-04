@@ -702,3 +702,28 @@ def test_markdown_extract_items_never_read_as_stale(cli, tmp_path, schema_file):
     listed = cli.invoke("history", "list", "--json")
     records = {r["job_item_id"]: r for r in json.loads(listed.stdout)}
     assert records[extract_id]["stale"] is False
+
+
+def test_stale_clears_once_the_extract_is_rerun(cli, document, schema_file):
+    """The stale mark is a live derivation, not a sticky flag: re-running
+    the extract (which re-extracts in place against the new parse
+    generation) must clear it everywhere it renders."""
+    parse_id = parse_file(cli, document)
+    extract_id = extract_item(cli, parse_id, schema_file)
+    force_reparse(cli, document)
+
+    listed = cli.invoke("history", "list", "--json")
+    records = {r["job_item_id"]: r for r in json.loads(listed.stdout)}
+    assert records[extract_id]["stale"] is True
+
+    # Same invocation again: stale ⇒ re-extract in place, new generation.
+    rerun_id = extract_item(cli, parse_id, schema_file, job_id="extract-0002")
+    assert rerun_id == extract_id  # in place, not a sibling
+
+    listed = cli.invoke("history", "list", "--json")
+    records = {r["job_item_id"]: r for r in json.loads(listed.stdout)}
+    assert records[extract_id]["stale"] is False
+    items = {item["id"]: item for item in history_js_items(cli)}
+    assert items[extract_id]["stale"] is False
+    human = cli.invoke("history", "list")
+    assert "(stale)" not in human.stdout
