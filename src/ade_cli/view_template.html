@@ -623,7 +623,7 @@
   /* Inline right-side labels — ExtractedDataJSONView.tsx:583-611 */
   .ex-line .linelabel { position: absolute; right: 16px; top: 0; font-size: 12px; font-style: italic; color: var(--text-tertiary); pointer-events: none; }
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; background: var(--bg-highlight); color: var(--text-secondary); }
-  .badge.stale { background: #fefdf0; color: #a15c07; }
+  .badge.stale { background: #fefdf0; color: #a15c07; cursor: help; }
   /* Schema tree — read-only SchemaTreeEditor.tsx rows (:462-486): name +
      colored type badge on one row, description on its own row below;
      children indent 16px (:337); highlight bg-green-400/10 on path
@@ -1767,8 +1767,8 @@ function buildExtract(extractId) {
   if (ex.model) el("span", "badge", shead).textContent = ex.model;
   if (ex.stale) {
     const b = el("span", "badge stale", shead);
-    b.textContent = "stale — boxes withheld";
-    b.title = "Ran against an older parse: its spans index markdown that no longer exists, so no boxes are drawn against the new pages.";
+    b.textContent = "stale";
+    b.title = "The original parse result was replaced by a newer parse run (--force re-parse), so this extraction is stale: it was produced against the previous run, its evidence indexes markdown that no longer exists, and no boxes are drawn on the new pages. Re-run ade extract to refresh it.";
   } else if (!grounded) {
     const b = el("span", "badge stale", shead);
     b.textContent = "spans only — " + (ev.reason || "no grounding");
