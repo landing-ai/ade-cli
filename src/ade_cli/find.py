@@ -31,7 +31,7 @@ from .output import (
 def find(
     tokens: list[str] | None = typer.Argument(
         None,
-        metavar="[JOB_ID] [QUERY]",
+        metavar="[JOB_ITEM_ID] [QUERY]",
         help="Job item id (or unambiguous prefix) to search, then an "
         "optional case-insensitive substring QUERY. With --job, the one "
         "allowed positional is the QUERY.",
@@ -41,7 +41,7 @@ def find(
         "--job",
         help="Parse job item to search (id or unambiguous prefix); "
         "repeatable for multi-item search. Equivalent to the positional "
-        "JOB_ID for a single item.",
+        "JOB_ITEM_ID for a single item.",
     ),
     regex: bool = typer.Option(
         False,
@@ -61,12 +61,12 @@ def find(
     as_json: bool = JSON_FLAG,
     id_only: bool = ID_ONLY_FLAG,
 ) -> None:
-    """Search parsed elements locally: `find JOB_ID [QUERY]`, or --job
+    """Search parsed elements locally: `find JOB_ITEM_ID [QUERY]`, or --job
     (repeatable) for several items; no query lists every element.
 
     Ids discovered here are what `view --element-id` deep-links and
     `crop --element-id` renders — though `crop` takes these same filters
-    directly (`crop JOB_ID --type figure`) when you want the images
+    directly (`crop JOB_ITEM_ID --type figure`) when you want the images
     rather than the records.
     """
     set_id_only(id_only)
@@ -89,11 +89,11 @@ def find(
         if not positionals:
             exit_usage(
                 "Provide a job item id (or unambiguous prefix): "
-                "`ade find JOB_ID [QUERY]`, or --job JOB_ID (repeatable); "
+                "`ade find JOB_ITEM_ID [QUERY]`, or --job JOB_ITEM_ID (repeatable); "
                 "run `ade history list` to see the store."
             )
         if len(positionals) > 2:
-            exit_usage("Too many arguments: `ade find JOB_ID [QUERY]`.")
+            exit_usage("Too many arguments: `ade find JOB_ITEM_ID [QUERY]`.")
         job_tokens = positionals[:1]
         query = positionals[1] if len(positionals) == 2 else None
     pattern: re.Pattern[str] | None = None

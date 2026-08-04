@@ -269,7 +269,7 @@ def test_find_requires_a_job_id(cli):
     assert result.exit_code == 2
     payload = json.loads(result.stdout)
     assert payload["error"] == "bad_query"
-    assert "JOB_ID" in payload["message"]
+    assert "JOB_ITEM_ID" in payload["message"]
     assert "history list" in payload["message"]
 
 

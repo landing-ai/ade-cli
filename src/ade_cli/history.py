@@ -33,7 +33,7 @@ def _history_default(ctx: typer.Context, as_json: bool = JSON_FLAG) -> None:
 
 
 def require_job_id(token: str | None, *, as_json: bool) -> str:
-    """Usage gate for commands targeting one JOB_ID argument. Typer's own
+    """Usage gate for commands targeting one JOB_ITEM_ID argument. Typer's own
     missing-argument error bypasses the output convention (no JSON on
     stdout, no remediation), so the argument is optional at the CLI layer
     and required here, where the error can follow the contract."""
@@ -315,7 +315,7 @@ def _overhead(columns: int) -> int:
 def clear(
     ctx: typer.Context,
     job_id: str | None = typer.Argument(
-        None, metavar="[JOB_ID]", help="Job item id or unambiguous prefix."
+        None, metavar="[JOB_ITEM_ID]", help="Job item id or unambiguous prefix."
     ),
     clear_all: bool = typer.Option(False, "--all", help="Delete every stored job item."),
     as_json: bool = JSON_FLAG,
@@ -325,8 +325,8 @@ def clear(
     dangling refs."""
     if (job_id is None) == (not clear_all):
         emit(
-            {"error": "bad_target", "message": "Provide exactly one of JOB_ID or --all."},
-            "Provide exactly one of JOB_ID or --all.",
+            {"error": "bad_target", "message": "Provide exactly one of JOB_ITEM_ID or --all."},
+            "Provide exactly one of JOB_ITEM_ID or --all.",
             as_json=as_json,
         )
         raise typer.Exit(code=EXIT_USAGE)

@@ -156,7 +156,7 @@ def find_element_or_exit(
 
 def crop(
     job_id_token: str | None = typer.Argument(
-        None, metavar="[JOB_ID]", help="Job item id or unambiguous prefix."
+        None, metavar="[JOB_ITEM_ID]", help="Job item id or unambiguous prefix."
     ),
     element_ids: list[str] = typer.Option(
         [], "--element-id", help="Element to crop (ids from `ade find`); repeatable."

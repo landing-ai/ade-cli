@@ -9,7 +9,7 @@ design and works from ``file://``; the first ``PAGE_CAP`` pages embed
 inline (small documents stay one shareable file) and every page beyond
 loads on demand from ``pages-N.js`` sidecar chunks in the store.
 
-New-layout command (the job-item store): ``view JOB_ID`` where JOB_ID is a
+New-layout command (the job-item store): ``view JOB_ITEM_ID`` where JOB_ITEM_ID is a
 job item id or unambiguous prefix. A parse item's viewer holds the parse
 ONLY — a document can carry many extractions and the viewer can't guess
 which one the user means. Each extract item owns its viewer: a LIGHT
@@ -25,7 +25,7 @@ item's status ``none → building → built`` so sidebar links go live without
 blocking this command.
 
 Store scan/records/resolution live in ``items``; the sidebar read model in
-``historyjs``; JOB_ID gating in ``history`` (#58's layers) — this module
+``historyjs``; JOB_ITEM_ID gating in ``history`` (#58's layers) — this module
 owns only the artifacts.
 """
 
@@ -732,7 +732,7 @@ def _builds_own_viewer(record: dict) -> bool:
 
 
 def _latest_viewable(store: JobStore, records: list[dict]) -> str | None:
-    """The default JOB_ID for a bare ``view``: the newest-submitted item
+    """The default JOB_ITEM_ID for a bare ``view``: the newest-submitted item
     whose viewer can actually build. Pending/failed runs and orphaned
     refs are skipped by state; a generation-torn item (its bundle won't
     load) is skipped by trying — an older viewable sibling beats an
@@ -890,7 +890,7 @@ def view(
         None,
         help="Job item id or unambiguous prefix (default: the latest "
         "viewable job item).",
-        metavar="JOB_ID",
+        metavar="JOB_ITEM_ID",
     ),
     element_id: str | None = typer.Option(
         None, "--element-id", help="Emit a deep link to this element."

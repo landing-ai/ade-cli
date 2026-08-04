@@ -4,17 +4,17 @@ Runs on the shared lifecycle in ``guarantee.py`` (claim tickets, wait
 semantics, interrupt posture, tiers, pending-as-non-error all inherited).
 Every extraction is its own top-level job item under ``jobs/``, keyed like
 parse: verb × source × content × extract params (schema + model + options
-— plus, for the JOB_ID form, the referenced parse item: parse *variants*
+— plus, for the JOB_ITEM_ID form, the referenced parse item: parse *variants*
 of one document must mint sibling extractions, never re-run one in
 place). Input is exactly one of:
 
-- ``JOB_ID`` — a completed parse job item (or unambiguous prefix); the
+- ``JOB_ITEM_ID`` — a completed parse job item (or unambiguous prefix); the
   extract item *references* it via ``parse/ref.json`` — parse artifacts
   are never copied, so there is one copy of ground truth and staleness
   stays a job_id comparison.
 - ``-d FILE`` — extract by document path: reuse the latest completed
   parse job of this path+content (any params, newest ``completed_at``
-  wins; logged and referenced exactly like the JOB_ID form). If none
+  wins; logged and referenced exactly like the JOB_ITEM_ID form). If none
   exists, run a **standalone parse job first** — bare ``parse -d``
   params, a normal top-level parse item, exactly as if the user had run
   ``parse -d`` — then the extract referencing it: two billable jobs,
@@ -233,7 +233,7 @@ def extract(
     ctx: typer.Context,
     job_id_token: str | None = typer.Argument(
         None,
-        metavar="[JOB_ID]",
+        metavar="[JOB_ITEM_ID]",
         help="A completed parse job item id (or unambiguous prefix).",
     ),
     schema_spec: str = typer.Option(
@@ -271,7 +271,7 @@ def extract(
     environment: str | None = typer.Option(
         None, "--env",
         help=f"Environment to run against: {', '.join(ENVIRONMENTS)} "
-        "(default: $ADE_ENV, then production). The JOB_ID form inherits the "
+        "(default: $ADE_ENV, then production). The JOB_ITEM_ID form inherits the "
         "parse item's environment instead — its server-side parse job only "
         "exists there — and a conflicting --env is refused.",
     ),
@@ -288,7 +288,7 @@ def extract(
     markdown); persist the result as its own job item.
 
     The schema-shaped result rides in the payload (`extraction`) with its
-    per-field evidence; `view JOB_ID` renders the same join on the page,
+    per-field evidence; `view JOB_ITEM_ID` renders the same join on the page,
     and `find`/`crop` on the referenced parse reach the cited elements.
     """
     set_id_only(id_only)
@@ -300,7 +300,7 @@ def extract(
     ]
     if len(sources) != 1:
         message = (
-            "Provide exactly one of JOB_ID, -d/--document, --markdown, "
+            "Provide exactly one of JOB_ITEM_ID, -d/--document, --markdown, "
             "or --markdown-url."
         )
         exit_with(
@@ -314,7 +314,7 @@ def extract(
     _require_extractable_schema(schema, as_json=as_json)
 
     # Resolves --env → ADE_ENV → production, and validates the flag before
-    # any billable step. The JOB_ID branch below re-resolves with the parse
+    # any billable step. The JOB_ITEM_ID branch below re-resolves with the parse
     # item's own environment: the item pins the target (its server-side
     # parse job id exists nowhere else), overriding ambient ADE_ENV, while
     # an explicit conflicting --env is refused loudly.
@@ -402,7 +402,7 @@ def extract(
         source = str(document.resolve())
         found = items.latest_parse(jobs, identity, resolved.environment)
         if found is not None:
-            # Reused and referenced exactly like the JOB_ID form — no parse
+            # Reused and referenced exactly like the JOB_ITEM_ID form — no parse
             # billed; the reuse is logged in the summary.
             parse_item_id, live_meta, live_response = found
             markdown_text = live_response["markdown"]
@@ -810,7 +810,7 @@ def extract(
                 "kind": "extract",
                 "source": source,
                 # Part of the id; matches the referenced parse item's by
-                # construction (the JOB_ID form inherits it).
+                # construction (the JOB_ITEM_ID form inherits it).
                 "environment": resolved.environment,
                 "identity": identity,
                 "state": "extracted",

@@ -153,7 +153,7 @@ ade parse -d doc.pdf --id-only                    # re-run to resume; same id
 
 | command | what it does |
 |---|---|
-| `ade extract JOB_ID --schema schema.json` | extract a completed parse job item |
+| `ade extract JOB_ITEM_ID --schema schema.json` | extract a completed parse job item |
 | `ade extract -d invoice.pdf --schema '…'` | by path: reuse the latest parse, else parse first |
 | `ade extract --markdown notes.md --schema '…'` | bring-your-own markdown |
 | `ade extract --markdown-url https://…/notes.md --schema schema.json` | bring-your-own markdown, fetched by the server |
@@ -189,16 +189,16 @@ ade extract $JOB --schema schema.json --json | jq .extraction
 | command | what it does |
 |---|---|
 | `ade view` | the latest *viewable* job item's HTML viewer (opens in your browser on a terminal) |
-| `ade view JOB_ID` | a specific job item (id or unambiguous prefix) |
-| `ade view JOB_ID --element-id ELEMENT_ID` | deep link straight to one element |
-| `ade crop JOB_ID --element-id ELEMENT_ID` | PNG of just that element's region |
-| `ade crop JOB_ID --type figure` | PNG of every figure — one command, no loop |
-| `ade crop JOB_ID --all -o ./crops` | every element, into a directory you pick |
+| `ade view JOB_ITEM_ID` | a specific job item (id or unambiguous prefix) |
+| `ade view JOB_ITEM_ID --element-id ELEMENT_ID` | deep link straight to one element |
+| `ade crop JOB_ITEM_ID --element-id ELEMENT_ID` | PNG of just that element's region |
+| `ade crop JOB_ITEM_ID --type figure` | PNG of every figure — one command, no loop |
+| `ade crop JOB_ITEM_ID --all -o ./crops` | every element, into a directory you pick |
 
 On a terminal, `view` opens the viewer in your browser by default
 (`--no-open` suppresses it); `--json` runs and piped output never
 launch a browser — the artifact path is in the output either way.
-Without a JOB_ID, `view` targets the latest viewable job item.
+Without a JOB_ITEM_ID, `view` targets the latest viewable job item.
 
 Every job item gets a **self-contained `view.html`**: page images with
 bounding-box overlays beside the parsed markdown (or extraction JSON),
@@ -225,7 +225,7 @@ loads the rest on demand from sidecar files rendered into the store.
 | `ade history` | defaults to `ade history list` |
 | `ade history list` | one row per job item: id, kind, state, params, source |
 | `ade history list --json` | full records (params verbatim, timestamps, linkage) |
-| `ade history clear JOB_ID` | delete an item; clearing a parse cascades to its extracts |
+| `ade history clear JOB_ITEM_ID` | delete an item; clearing a parse cascades to its extracts |
 | `ade history clear --all` | delete every stored job item |
 
 The read model over the store — zero API calls; states derive from tickets
@@ -238,7 +238,7 @@ re-run `ade extract` to refresh it. Every `history`/`view` run re-scans
 so manually deleted folders simply vanish from listings.
 
 Commands that read the store (`view`, `crop`, `find`, `history clear`,
-`extract JOB_ID`) take a **job item id or an unambiguous prefix** — paths
+`extract JOB_ITEM_ID`) take a **job item id or an unambiguous prefix** — paths
 are accepted only by the convenience verbs (`parse -d`, `extract -d`); run
 `ade history list` when you have a path and need an id.
 
@@ -246,10 +246,10 @@ are accepted only by the convenience verbs (`parse -d`, `extract -d`); run
 
 | command | what it does |
 |---|---|
-| `ade find JOB_ID "total"` | case-insensitive substring |
+| `ade find JOB_ITEM_ID "total"` | case-insensitive substring |
 | `ade find --job ITEM_A --job ITEM_B --json "€42"` | multi-item (`--job`, repeatable), tagged by `job_item_id` |
-| `ade find JOB_ID --type table_cell --regex '€\d+'` | filters compose: type + regex |
-| `ade find JOB_ID --page 1 --limit 5` | no query = every element |
+| `ade find JOB_ITEM_ID --type table_cell --regex '€\d+'` | filters compose: type + regex |
+| `ade find JOB_ITEM_ID --page 1 --limit 5` | no query = every element |
 
 Pure local search over a parse job item's elements projection — zero API
 calls, no ranking. All filters compose (AND): QUERY (substring, or a regex
