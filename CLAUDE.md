@@ -14,6 +14,10 @@ Default canonical labels: `needs-triage`, `needs-info`, `ready-for-agent`, `read
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+### Writing style
+
+Standards for help text, the README, and SKILL.md; inline code in help prose is always backticked (test-enforced). See `docs/agents/writing-style.md`.
+
 ## Development
 
 Setup, from-source install, the design-doc map, and the release process live in `CONTRIBUTING.md`. The README is user-facing only.

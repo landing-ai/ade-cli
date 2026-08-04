@@ -102,12 +102,12 @@ def parse(
     ctx: typer.Context,
     document: Path | None = typer.Option(
         None, "-d", "--document", exists=True, dir_okay=False, readable=True,
-        help="Local document file to parse; pass exactly one of -d/--document or --document-url.",
+        help="Local document file to parse; pass exactly one of -d/`--document` or `--document-url`.",
     ),
     document_url: str | None = typer.Option(
         None, "--document-url",
         help="Document URL the server fetches (identity is the URL x params; "
-        "a re-run dedups even if the remote content changed — --force refreshes).",
+        "a re-run dedups even if the remote content changed — `--force` refreshes).",
     ),
     model: str = typer.Option(
         DEFAULT_MODEL, "--model", help="Parse model registry version."
@@ -138,7 +138,7 @@ def parse(
         "password: always rejected (422) — decrypt PDFs before upload. "
         "Example: '{\"inline_markdown\": true, \"blocks\": {\"table\": "
         "{\"format\": \"markdown\"}}}'. "
-        "Merges with --pages; giving pages in both is an error.",
+        "Merges with `--pages`; giving pages in both is an error.",
     ),
     environment: str | None = typer.Option(
         None, "--env",

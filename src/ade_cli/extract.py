@@ -273,7 +273,7 @@ def extract(
         help=f"Environment to run against: {', '.join(ENVIRONMENTS)} "
         "(default: $ADE_ENV, then production). The JOB_ITEM_ID form inherits the "
         "parse item's environment instead — its server-side parse job only "
-        "exists there — and a conflicting --env is refused.",
+        "exists there — and a conflicting `--env` is refused.",
     ),
     wait: float = typer.Option(600.0, "--wait", help="Poll budget in seconds."),
     force: bool = typer.Option(

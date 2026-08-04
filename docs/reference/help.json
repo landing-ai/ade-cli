@@ -4,11 +4,11 @@
   "conventions": [
     {
       "name": "--json",
-      "rule": "Every command supports --json: one stable JSON object/array on stdout (errors and pending payloads follow the same rule). Agents should always pass it. Each command's published shape is its 'result' block below \u2014 the full result is always on stdout, never only in a file."
+      "rule": "Every command supports `--json`: one stable JSON object/array on stdout (errors and pending payloads follow the same rule). Agents should always pass it. Each command's published shape is its 'result' block below \u2014 the full result is always on stdout, never only in a file."
     },
     {
       "name": "--id-only",
-      "rule": "parse, extract, and find also take --id-only: just the id(s), one per line, for piping (JOB=$(ade parse -d f.pdf --id-only)). Errors and hints go to stderr so a captured id is never a sentence."
+      "rule": "parse, extract, and find also take `--id-only`: just the id(s), one per line, for piping (`JOB=$(ade parse -d f.pdf --id-only)`). Errors and hints go to stderr so a captured id is never a sentence."
     },
     {
       "name": "job item ids",
@@ -16,7 +16,7 @@
     },
     {
       "name": "guarantees",
-      "rule": "parse and extract ensure a run exists rather than fire a request: an already-done run is served from disk free with an explicit notice (--force consents to a re-bill); a pending run is resumed, never resubmitted; Ctrl-C stops the waiting, not the work."
+      "rule": "parse and extract ensure a run exists rather than fire a request: an already-done run is served from disk free with an explicit notice (`--force` consents to a re-bill); a pending run is resumed, never resubmitted; Ctrl-C stops the waiting, not the work."
     },
     {
       "name": "env overrides",
@@ -27,7 +27,7 @@
     {
       "name": "auth login",
       "usage": "ade auth login [options] [--json]",
-      "summary": "Ensure the target environment is logged in; --api-key\nauthenticates with a key directly ('-' prompts with hidden input).\nTargets --env, else $ADE_ENV, else production \u2014 nothing is stored\nabout the choice.",
+      "summary": "Ensure the target environment is logged in; `--api-key`\nauthenticates with a key directly ('-' prompts with hidden input).\nTargets `--env`, else $ADE_ENV, else production \u2014 nothing is stored\nabout the choice.",
       "arguments": [],
       "flags": [
         {
@@ -138,7 +138,7 @@
     {
       "name": "auth logout",
       "usage": "ade auth logout [options] [--json]",
-      "summary": "Log out of one environment (the resolved target by default); --all\nclears every environment. Idempotent; OAuth refresh tokens are revoked\nbest-effort first.",
+      "summary": "Log out of one environment (the resolved target by default); `--all`\nclears every environment. Idempotent; OAuth refresh tokens are revoked\nbest-effort first.",
       "arguments": [],
       "flags": [
         {
@@ -178,7 +178,7 @@
           },
           {
             "key": "environment",
-            "what": "the environment cleared (null with --all)"
+            "what": "the environment cleared (null with `--all`)"
           }
         ]
       },
@@ -187,7 +187,7 @@
     {
       "name": "login",
       "usage": "ade login [options] [--json]",
-      "summary": "Alias of `ade auth login`: ensure the target environment is logged in; --api-key authenticates with a key directly ('-' prompts with hidden input).",
+      "summary": "Alias of `ade auth login`: ensure the target environment is logged in; `--api-key` authenticates with a key directly ('-' prompts with hidden input).",
       "arguments": [],
       "flags": [
         {
@@ -248,7 +248,7 @@
     {
       "name": "logout",
       "usage": "ade logout [options] [--json]",
-      "summary": "Alias of `ade auth logout`: log out of one environment (the resolved target by default); --all clears every environment.",
+      "summary": "Alias of `ade auth logout`: log out of one environment (the resolved target by default); `--all` clears every environment.",
       "arguments": [],
       "flags": [
         {
@@ -288,7 +288,7 @@
           },
           {
             "key": "environment",
-            "what": "the environment cleared (null with --all)"
+            "what": "the environment cleared (null with `--all`)"
           }
         ]
       },
@@ -357,7 +357,7 @@
     {
       "name": "help",
       "usage": "ade help [COMMAND|TOPIC]... [--json]",
-      "summary": "Print the whole-surface command reference in one call: every\ncommand and flag, the output convention, each verb's result shape,\nexit states, and the store layout. The agent bootstrap \u2014 run this\n(with --json) before anything else. `help TOPIC` prints one\nconceptual page instead (workflow, output, credentials, errors).",
+      "summary": "Print the whole-surface command reference in one call: every\ncommand and flag, the output convention, each verb's result shape,\nexit states, and the store layout. The agent bootstrap \u2014 run this\n(with `--json`) before anything else. `help TOPIC` prints one\nconceptual page instead (workflow, output, credentials, errors).",
       "arguments": [
         {
           "name": "[COMMAND|TOPIC]...",
@@ -409,14 +409,14 @@
           "metavar": "FILE",
           "required": false,
           "default": null,
-          "help": "Local document file to parse; pass exactly one of -d/--document or --document-url."
+          "help": "Local document file to parse; pass exactly one of -d/`--document` or `--document-url`."
         },
         {
           "flags": "--document-url",
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Document URL the server fetches (identity is the URL x params; a re-run dedups even if the remote content changed \u2014 --force refreshes)."
+          "help": "Document URL the server fetches (identity is the URL x params; a re-run dedups even if the remote content changed \u2014 `--force` refreshes)."
         },
         {
           "flags": "--model",
@@ -444,7 +444,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Full ParseOptions pass-through as a JSON object, sent verbatim (the server rejects unknown keys with a 422). Keys as of this release \u2014 pages: 1-indexed integer array (default: all pages); atomic_grounding: bool (default true; false omits the per-line atomic_grounding field from every node); inline_markdown: bool (default false; true adds each node's own markdown slice inline); blocks.<type>.markdown: bool (default true; false suppresses that type's markdown; types: text, table, figure, marginalia, attestation, logo, scan_code, card); blocks.table.format: 'html' (default) or 'markdown'; password: always rejected (422) \u2014 decrypt PDFs before upload. Example: '{\"inline_markdown\": true, \"blocks\": {\"table\": {\"format\": \"markdown\"}}}'. Merges with --pages; giving pages in both is an error."
+          "help": "Full ParseOptions pass-through as a JSON object, sent verbatim (the server rejects unknown keys with a 422). Keys as of this release \u2014 pages: 1-indexed integer array (default: all pages); atomic_grounding: bool (default true; false omits the per-line atomic_grounding field from every node); inline_markdown: bool (default false; true adds each node's own markdown slice inline); blocks.<type>.markdown: bool (default true; false suppresses that type's markdown; types: text, table, figure, marginalia, attestation, logo, scan_code, card); blocks.table.format: 'html' (default) or 'markdown'; password: always rejected (422) \u2014 decrypt PDFs before upload. Example: '{\"inline_markdown\": true, \"blocks\": {\"table\": {\"format\": \"markdown\"}}}'. Merges with `--pages`; giving pages in both is an error."
         },
         {
           "flags": "--env",
@@ -479,7 +479,7 @@
           "metavar": null,
           "required": false,
           "default": null,
-          "help": "Print only the id(s) this run produced, one per line \u2014 the piping mode (JOB=$(ade parse -d f.pdf --id-only)). Takes precedence over --json; errors and hints go to stderr."
+          "help": "Print only the id(s) this run produced, one per line \u2014 the piping mode (JOB=$(ade parse -d f.pdf `--id-only`)). Takes precedence over `--json`; errors and hints go to stderr."
         }
       ],
       "supports_json": true,
@@ -540,11 +540,11 @@
           },
           {
             "key": "markdown",
-            "what": "the parse markdown \u2014 only with --include markdown"
+            "what": "the parse markdown \u2014 only with `--include markdown`"
           },
           {
             "key": "elements",
-            "what": "the flat projection \u2014 only with --include elements"
+            "what": "the flat projection \u2014 only with `--include elements`"
           }
         ]
       },
@@ -616,7 +616,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Environment to run against: dev, staging, production, eu (default: $ADE_ENV, then production). The JOB_ITEM_ID form inherits the parse item's environment instead \u2014 its server-side parse job only exists there \u2014 and a conflicting --env is refused."
+          "help": "Environment to run against: dev, staging, production, eu (default: $ADE_ENV, then production). The JOB_ITEM_ID form inherits the parse item's environment instead \u2014 its server-side parse job only exists there \u2014 and a conflicting `--env` is refused."
         },
         {
           "flags": "--wait",
@@ -637,7 +637,7 @@
           "metavar": null,
           "required": false,
           "default": null,
-          "help": "Print only the id(s) this run produced, one per line \u2014 the piping mode (JOB=$(ade parse -d f.pdf --id-only)). Takes precedence over --json; errors and hints go to stderr."
+          "help": "Print only the id(s) this run produced, one per line \u2014 the piping mode (JOB=$(ade parse -d f.pdf `--id-only`)). Takes precedence over `--json`; errors and hints go to stderr."
         }
       ],
       "supports_json": true,
@@ -772,7 +772,7 @@
           },
           {
             "key": "stale",
-            "what": "extract items: true when the referenced parse was --force re-run after this extraction"
+            "what": "extract items: true when the referenced parse was `--force` re-run after this extraction"
           },
           {
             "key": "created_at / completed_at",
@@ -821,12 +821,12 @@
     {
       "name": "find",
       "usage": "ade find [JOB_ITEM_ID] [QUERY] [options] [--json]",
-      "summary": "Search parsed elements locally: `find JOB_ITEM_ID [QUERY]`, or --job\n(repeatable) for several items; no query lists every element.\n\nIds discovered here are what `view --element-id` deep-links and\n`crop --element-id` renders \u2014 though `crop` takes these same filters\ndirectly (`crop JOB_ITEM_ID --type figure`) when you want the images\nrather than the records.",
+      "summary": "Search parsed elements locally: `find JOB_ITEM_ID [QUERY]`, or `--job`\n(repeatable) for several items; no query lists every element.\n\nIds discovered here are what `view --element-id` deep-links and\n`crop --element-id` renders \u2014 though `crop` takes these same filters\ndirectly (`crop JOB_ITEM_ID --type figure`) when you want the images\nrather than the records.",
       "arguments": [
         {
           "name": "[JOB_ITEM_ID] [QUERY]",
           "required": false,
-          "help": "Job item id (or unambiguous prefix) to search, then an optional case-insensitive substring QUERY. With --job, the one allowed positional is the QUERY."
+          "help": "Job item id (or unambiguous prefix) to search, then an optional case-insensitive substring QUERY. With `--job`, the one allowed positional is the QUERY."
         }
       ],
       "flags": [
@@ -877,7 +877,7 @@
           "metavar": null,
           "required": false,
           "default": null,
-          "help": "Print only the id(s) this run produced, one per line \u2014 the piping mode (JOB=$(ade parse -d f.pdf --id-only)). Takes precedence over --json; errors and hints go to stderr."
+          "help": "Print only the id(s) this run produced, one per line \u2014 the piping mode (JOB=$(ade parse -d f.pdf `--id-only`)). Takes precedence over `--json`; errors and hints go to stderr."
         }
       ],
       "supports_json": true,
@@ -909,7 +909,7 @@
             "what": "the element's markdown slice"
           }
         ],
-        "note": "One record per match, in document order; [] when nothing matched. --id-only prints the element ids alone."
+        "note": "One record per match, in document order; [] when nothing matched. `--id-only` prints the element ids alone."
       },
       "band": "local read models"
     },
@@ -937,21 +937,21 @@
           "metavar": null,
           "required": false,
           "default": null,
-          "help": "With --element-id: render that element's PNG crop instead of the HTML artifact."
+          "help": "With `--element-id`: render that element's PNG crop instead of the HTML artifact."
         },
         {
           "flags": "--open, --no-open",
           "metavar": null,
           "required": false,
           "default": null,
-          "help": "Open the result in the browser. Default: open when stdout is a terminal; --json runs and piped output never auto-open."
+          "help": "Open the result in the browser. Default: open when stdout is a terminal; `--json` runs and piped output never auto-open."
         },
         {
           "flags": "--dpi",
           "metavar": "INTEGER",
           "required": false,
           "default": null,
-          "help": "Page render dpi (default 120); with --crop, the crop dpi (default 300)."
+          "help": "Page render dpi (default 120); with `--crop`, the crop dpi (default 300)."
         },
         {
           "flags": "--pages",
@@ -972,14 +972,14 @@
           "metavar": null,
           "required": false,
           "default": null,
-          "help": "Open via a local server (http://127.0.0.1) instead of file:// \u2014 browser zoom then covers every viewer natively. Starts the server if needed; reuses a running one. It retires itself after 30 idle minutes, or immediately with --stop-server."
+          "help": "Open via a local server (http://127.0.0.1) instead of file:// \u2014 browser zoom then covers every viewer natively. Starts the server if needed; reuses a running one. It retires itself after 30 idle minutes, or immediately with `--stop-server`."
         },
         {
           "flags": "--stop-server",
           "metavar": null,
           "required": false,
           "default": null,
-          "help": "Stop the local viewer server (started by --serve) and exit."
+          "help": "Stop the local viewer server (started by `--serve`) and exit."
         }
       ],
       "supports_json": true,
@@ -988,7 +988,7 @@
         "keys": [
           {
             "key": "status",
-            "what": "'viewed' ('cropped' with --crop, 'synced' with --sync-viewers)"
+            "what": "'viewed' ('cropped' with `--crop`, 'synced' with `--sync-viewers`)"
           },
           {
             "key": "job_item_id",
@@ -1000,7 +1000,7 @@
           },
           {
             "key": "path",
-            "what": "the self-contained view.html (or the PNG, with --crop)"
+            "what": "the self-contained view.html (or the PNG, with `--crop`)"
           },
           {
             "key": "built",
@@ -1016,7 +1016,7 @@
           },
           {
             "key": "deep_link",
-            "what": "view.html#element=... when --element-id was given"
+            "what": "view.html#element=... when `--element-id` was given"
           },
           {
             "key": "history_items",
@@ -1117,7 +1117,7 @@
             "what": "one record per PNG (element_id, type, page, box, dpi, path, width, height)"
           }
         ],
-        "note": "One shape whatever matched: a single --element-id is count 1 with one crops[] record; a filter (--type/--page/--all) matching nothing is count 0 with crops []."
+        "note": "One shape whatever matched: a single `--element-id` is count 1 with one crops[] record; a filter (`--type`/`--page`/`--all`) matching nothing is count 0 with crops []."
       },
       "band": "local read models"
     }

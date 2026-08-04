@@ -33,7 +33,7 @@ def find(
         None,
         metavar="[JOB_ITEM_ID] [QUERY]",
         help="Job item id (or unambiguous prefix) to search, then an "
-        "optional case-insensitive substring QUERY. With --job, the one "
+        "optional case-insensitive substring QUERY. With `--job`, the one "
         "allowed positional is the QUERY.",
     ),
     job_tokens: list[str] = typer.Option(
@@ -61,7 +61,7 @@ def find(
     as_json: bool = JSON_FLAG,
     id_only: bool = ID_ONLY_FLAG,
 ) -> None:
-    """Search parsed elements locally: `find JOB_ITEM_ID [QUERY]`, or --job
+    """Search parsed elements locally: `find JOB_ITEM_ID [QUERY]`, or `--job`
     (repeatable) for several items; no query lists every element.
 
     Ids discovered here are what `view --element-id` deep-links and

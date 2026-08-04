@@ -45,6 +45,10 @@ no Python required.
   ```
 
 - `docs/telemetry.md`, `docs/user-agent.md` — wire-visible contracts.
+- `docs/agents/writing-style.md` — standards for help text, the README,
+  and SKILL.md. Backticked inline code in help prose is enforced by
+  `tests/test_help_style.py`; the hosted docs generate their CLI
+  reference from `help --json`, so these strings are customer-facing.
 
 ## Releasing
 

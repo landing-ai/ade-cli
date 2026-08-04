@@ -133,13 +133,13 @@ app.add_typer(history_app)
 app.command(
     "login",
     help="Alias of `ade auth login`: ensure the target environment is "
-    "logged in; --api-key authenticates with a key directly ('-' prompts "
+    "logged in; `--api-key` authenticates with a key directly ('-' prompts "
     "with hidden input).",
 )(login)
 app.command(
     "logout",
     help="Alias of `ade auth logout`: log out of one environment (the "
-    "resolved target by default); --all clears every environment.",
+    "resolved target by default); `--all` clears every environment.",
 )(logout)
 app.command()(parse)
 app.command()(extract)
