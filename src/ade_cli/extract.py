@@ -121,6 +121,32 @@ def _load_schema(spec: str, *, as_json: bool) -> dict:
     return schema
 
 
+def _require_extractable_schema(schema: dict, *, as_json: bool) -> None:
+    """Refuse a schema with nothing to extract *before* any billable step
+    (the same local-validation posture as the --pages/--options conflict):
+    an empty ``properties`` map is valid JSON Schema, but the server still
+    processes the whole document with the LLM and bills for it while
+    returning zero fields."""
+    composes = any(
+        key in schema
+        for key in ("allOf", "anyOf", "oneOf", "$ref", "patternProperties", "items")
+    )
+    if schema.get("properties") or composes:
+        return
+    message = (
+        "The schema defines no fields to extract (empty or missing "
+        "'properties'). The request was not sent: the server would process "
+        "the whole document, bill credits, and return an empty extraction. "
+        "Add at least one property to the schema."
+    )
+    exit_with(
+        {"error": "empty_schema", "message": message},
+        message,
+        as_json=as_json,
+        code=EXIT_USAGE,
+    )
+
+
 def _schema_sha256(schema: dict) -> str:
     """Full sha256 of the schema's canonical JSON form — its stand-in in
     the recorded join params (the schema itself is recorded verbatim in
@@ -145,7 +171,8 @@ def _parse_bill(parse_item_id: str, parse_data: dict) -> dict:
     meta = parse_data["metadata"]
     return {
         "job_item_id": parse_item_id,
-        "job_id": meta["job_id"],
+        # User-facing name of the server-side id (the wire spells it job_id).
+        "run_id": meta["job_id"],
         "version": meta["model_version"],
         "credits": meta["billing"]["total_credits"],
         "tier": meta["billing"]["service_tier"],
@@ -265,6 +292,7 @@ def extract(
         )
 
     schema = _load_schema(schema_spec, as_json=as_json)
+    _require_extractable_schema(schema, as_json=as_json)
 
     # Resolves --env → ADE_ENV → production, and validates the flag before
     # any billable step. The JOB_ID branch below re-resolves with the parse
@@ -421,7 +449,7 @@ def extract(
         if not as_json:
             typer.echo(
                 f"no reusable parse for {source}; running a standalone "
-                f"parse job first (job item {parse_item_id}; bills a parse)",
+                f"parse first (job item {parse_item_id}; bills a parse)",
                 err=True,
             )
         parse_data, parse_job_id, _ = ensure_parsed(
@@ -522,7 +550,7 @@ def extract(
         elif parsed_first is not None:
             parse_line = (
                 f"\n  parse:    parsed first — job item "
-                f"{parsed_first['job_item_id']} · job {parsed_first['job_id']} "
+                f"{parsed_first['job_item_id']} · run {parsed_first['run_id']} "
                 f"· {parsed_first['version']} · {parsed_first['credits']} "
                 f"credits ({parsed_first['tier']}) — reusable, like any "
                 "parse job item"
@@ -558,7 +586,9 @@ def extract(
         next_line = "\n  next:     " + "   ·   ".join(next_cmds)
         payload = {
             "status": "extracted",
-            "job_id": job_id,
+            # The server-side run id — user-facing name for what the wire
+            # (and the stored ticket/meta) still spell job_id.
+            "run_id": job_id,
             "job_item_id": item_id,
             "environment": resolved.environment,
             "version": version,
@@ -603,7 +633,7 @@ def extract(
                     else ""
                 )
                 + parse_line
-                + f"\n  job:      {job_id}"
+                + f"\n  run:      {job_id}"
                 f"\n  model:    {version}"
                 f"\n  fields:   {len(fields)} ({grounding_note})"
                 # The alarm above the fold: a run billed at the partial
@@ -680,9 +710,9 @@ def extract(
         fresh=force,
         stderr_tty=ports.stderr_is_tty(),
         interrupted_no_job_hint=(
-            "Interrupted before a job was recorded; re-run the same command "
+            "Interrupted before a run was recorded; re-run the same command "
             "to continue. The resubmit carries the same idempotency key, so "
-            "the server can attach it to a job it already accepted instead "
+            "the server can attach it to a run it already accepted instead "
             "of billing a duplicate (platform support pending — see the "
             "filed ask)."
         ),

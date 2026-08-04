@@ -356,7 +356,7 @@ def test_json_payload_carries_the_contract_fields(cli, document):
 
     payload = json.loads(result.stdout)
     assert payload["status"] == "parsed"
-    assert payload["job_id"] == JOB_ID
+    assert payload["run_id"] == JOB_ID
     assert payload["job_item_id"] == item_dir(cli, document).name
     assert payload["version"] == MODEL_VERSION
     assert payload["credits"] == 2.5
@@ -364,7 +364,7 @@ def test_json_payload_carries_the_contract_fields(cli, document):
     assert payload["store_dir"] == str(item_dir(cli, document))
     assert payload["artifacts"] == ["parse.json", "parse.md", "elements.json"]
     assert set(payload) == {
-        "status", "job_id", "job_item_id", "environment", "version",
+        "status", "run_id", "job_item_id", "environment", "version",
         "credits", "tier", "page_count", "failed_pages", "cached", "stored",
         "store_dir", "artifacts",
     }
@@ -478,7 +478,7 @@ def test_wait_zero_submits_and_returns_without_polling(cli, document):
     assert result.exit_code == 3  # pending is a distinct outcome, not failure
     payload = json.loads(result.stdout)
     assert payload["status"] == "pending"
-    assert payload["job_id"] == JOB_ID
+    assert payload["run_id"] == JOB_ID
     assert payload["job_item_id"] == item_dir(cli, document).name
     assert len(cli.transport.requests) == 1  # submit only, no poll
     assert json.loads((item_dir(cli, document) / "job.json").read_text())["job_id"] == JOB_ID
@@ -581,7 +581,7 @@ def test_completed_without_inline_result_is_a_controlled_error(cli, document):
     assert result.exit_code == 1
     payload = json.loads(result.stdout)  # controlled output, no traceback
     assert payload["error"] == "missing_result"
-    assert payload["job_id"] == JOB_ID
+    assert payload["run_id"] == JOB_ID
 
 
 def test_unknown_job_status_is_a_controlled_error(cli, document):

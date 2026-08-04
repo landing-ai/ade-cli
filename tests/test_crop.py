@@ -81,17 +81,18 @@ def test_crop_writes_a_png_with_service_pixel_math(cli, parsed):
     payload = crop_json(cli, item_id, "--element-id", "table_cell-0")
 
     # The default artifact lands in the doc's crops/ dir, dpi-stamped.
-    assert payload["path"].endswith("crops/table_cell-0@300dpi.png")
+    (single,) = payload["crops"]
+    assert single["path"].endswith("crops/table_cell-0@300dpi.png")
     from PIL import Image
 
-    with Image.open(payload["path"]) as image:
+    with Image.open(single["path"]) as image:
         assert image.format == "PNG"
-        assert (image.width, image.height) == (payload["width"], payload["height"])
+        assert (image.width, image.height) == (single["width"], single["height"])
     # crop_region math: int(edge * raster) per side, page 612x792pt at
     # 300 dpi -> 2550x3300 px; the fixture cell's box is (.03,.06,.53,.56).
-    assert payload["width"] == int(0.53 * 2550) - int(0.03 * 2550)
-    assert payload["height"] == int(0.56 * 3300) - int(0.06 * 3300)
-    assert payload["page"] == 1
+    assert single["width"] == int(0.53 * 2550) - int(0.03 * 2550)
+    assert single["height"] == int(0.56 * 3300) - int(0.06 * 3300)
+    assert single["page"] == 1
 
 
 def test_crop_honors_output_path_and_dpi(cli, parsed, tmp_path):
@@ -102,9 +103,27 @@ def test_crop_honors_output_path_and_dpi(cli, parsed, tmp_path):
         cli, item_id, "--element-id", "table_cell-0", "-o", str(out), "--dpi", "72"
     )
 
-    assert payload["path"] == str(out)
+    (single,) = payload["crops"]
+    assert single["path"] == str(out)
+    assert payload["directory"] == str(out.parent)
     assert out.is_file()
-    assert payload["width"] == int(0.53 * 612) - int(0.03 * 612)  # 72 dpi = 1:1 pt
+    assert single["width"] == int(0.53 * 612) - int(0.03 * 612)  # 72 dpi = 1:1 pt
+
+
+def test_single_crop_lands_inside_an_output_directory(cli, parsed, tmp_path):
+    """A directory as -o is a landing spot in either mode (#156): the
+    single crop takes the default dpi-stamped name inside it instead of
+    crashing with IsADirectoryError."""
+    item_id, _ = parsed
+    out = tmp_path / "my_crops"
+    out.mkdir()
+
+    payload = crop_json(cli, item_id, "--element-id", "table_cell-0", "-o", str(out))
+
+    (single,) = payload["crops"]
+    assert payload["directory"] == str(out)
+    assert single["path"] == str(out / "table_cell-0@300dpi.png")
+    assert (out / "table_cell-0@300dpi.png").is_file()
 
 
 def test_crop_of_a_missing_source_is_a_clear_error_never_stale(cli, parsed):
@@ -131,7 +150,7 @@ def test_crop_page_beyond_an_image_source_is_page_missing(cli, tmp_path):
 
     # page-1 elements crop fine from the image itself.
     ok = crop_json(cli, item_id, "--element-id", "text-0")
-    assert ok["page"] == 1
+    assert ok["crops"][0]["page"] == 1
 
 
 def test_crop_requires_an_element_id(cli, parsed):
@@ -253,16 +272,18 @@ def test_several_element_ids_crop_as_a_batch(cli, parsed):
     assert partial["error"] == "unknown_element"
 
 
-def test_one_element_id_keeps_the_flat_single_crop_payload(cli, parsed):
-    """The batch shape is additive: addressing one element by id returns
-    exactly the payload it always did."""
+def test_one_element_id_yields_the_same_shape_as_a_batch(cli, parsed):
+    """One payload shape whatever matched (#157): a consumer never branches
+    on how many elements a run happened to crop."""
     item_id, _ = parsed
 
     payload = crop_json(cli, item_id, "--element-id", "text-0")
 
-    assert set(payload) == {
-        "status", "job_item_id", "element_id", "type", "page", "box", "dpi",
-        "path", "width", "height",
+    assert set(payload) == {"status", "job_item_id", "count", "directory", "crops"}
+    assert payload["count"] == 1
+    (single,) = payload["crops"]
+    assert set(single) == {
+        "element_id", "type", "page", "box", "dpi", "path", "width", "height",
     }
 
 
@@ -291,7 +312,7 @@ def test_crop_of_a_changed_source_warns_but_still_renders(cli, parsed):
     payload = crop_json(cli, item_id, "--element-id", "text-0")
 
     assert "changed after" in payload["warning"]
-    assert Path(payload["path"]).is_file()
+    assert Path(payload["crops"][0]["path"]).is_file()
 
     human = cli.invoke("crop", item_id, "--element-id", "text-0")
     assert human.exit_code == 0
@@ -388,21 +409,22 @@ def test_crop_of_a_referencing_extract_resolves_through_the_ref(
 
     # Elements and imagery come from the referenced parse; the PNG lands
     # under the addressed (extract) item's own crops/.
+    (single,) = payload["crops"]
     expected = cli.home / "jobs" / extract_id / "crops" / "table_cell-0@300dpi.png"
-    assert payload["path"] == str(expected)
+    assert single["path"] == str(expected)
     assert expected.is_file()
     assert payload["job_item_id"] == extract_id
     # Same pixel math as cropping via the parse item directly.
-    assert payload["width"] == int(0.53 * 2550) - int(0.03 * 2550)
-    assert payload["height"] == int(0.56 * 3300) - int(0.06 * 3300)
+    assert single["width"] == int(0.53 * 2550) - int(0.03 * 2550)
+    assert single["height"] == int(0.56 * 3300) - int(0.06 * 3300)
 
 
 def test_crop_via_extract_id_matches_crop_via_parse_id(cli, parsed, schema_file):
     parse_id, _ = parsed
     extract_id = extract_against(cli, parse_id, schema_file)
 
-    via_parse = crop_json(cli, parse_id, "--element-id", "text-0")
-    via_extract = crop_json(cli, extract_id, "--element-id", "text-0")
+    via_parse = crop_json(cli, parse_id, "--element-id", "text-0")["crops"][0]
+    via_extract = crop_json(cli, extract_id, "--element-id", "text-0")["crops"][0]
 
     # One shared pipeline: identical geometry, distinct crops/ homes.
     for key in ("type", "page", "box", "dpi", "width", "height"):

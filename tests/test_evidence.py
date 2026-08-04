@@ -106,7 +106,7 @@ def test_quoted_fields_yield_elements_pages_boxes_consistent_with_projection(
     # persisted as the recomputable evidence artifact, stamped by generation
     on_disk = json.loads(evidence_path(cli, payload).read_text())
     assert on_disk["kind"] == "grounded"
-    assert on_disk["job_id"] == payload["job_id"]
+    assert on_disk["job_id"] == payload["run_id"]
     assert field(on_disk["fields"], "total") == record
 
 

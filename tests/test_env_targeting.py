@@ -32,7 +32,7 @@ def make_document(tmp_path):
 
 def schema_file(tmp_path):
     path = tmp_path / "schema.json"
-    path.write_text(json.dumps({"type": "object", "properties": {}}))
+    path.write_text(json.dumps({"type": "object", "properties": {"total": {"type": "string"}}}))
     return path
 
 

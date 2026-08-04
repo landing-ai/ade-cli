@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import sys
+
 import typer
+# typer vendors its click fork; this is the exception type its
+# validation layer raises before any command body runs.
+from typer._click.exceptions import UsageError
 
 from .auth import auth_app, login, logout
 from .crop import crop
@@ -10,16 +16,65 @@ from .extract import extract
 from .find import find
 from .help import help_command
 from .history import history_app
-from .output import JSON_FLAG, emit, set_id_only
+from .output import (
+    EXIT_USAGE,
+    JSON_FLAG,
+    click_usage_payload,
+    emit,
+    set_id_only,
+)
 from .parse import parse
 from .ports import Ports
 from .telemetry import LedgerGroup
 from .update import current_version, install_mode, update
 from .view import view
 
+
+class AdeGroup(LedgerGroup):
+    """LedgerGroup with the ``--json`` output contract extended to Click's
+    own validation layer (#155): when the argv asked for machine output, a
+    parse/validation failure (missing option, unknown flag, a ``-d`` file
+    that does not exist) emits the standard error payload on stdout — or,
+    under ``--id-only``, the message on stderr — instead of the rich usage
+    box, so stdout is parseable for *every* error, not only the ones that
+    reach a command body."""
+
+    _argv: list[str] = []
+
+    def main(self, args=None, *pargs, **kwargs):  # type: ignore[override]
+        self._argv = [str(a) for a in (args if args is not None else sys.argv[1:])]
+        return super().main(args, *pargs, **kwargs)
+
+    def make_context(self, info_name, args, parent=None, **extra):  # type: ignore[override]
+        try:
+            return super().make_context(info_name, args, parent, **extra)
+        except UsageError as error:
+            self._structured_usage_error(error)
+            raise
+
+    def invoke(self, ctx):  # type: ignore[override]
+        # Subcommand parameters parse inside the group's invoke, so their
+        # validation errors surface here, not in make_context above.
+        try:
+            return super().invoke(ctx)
+        except UsageError as error:
+            self._structured_usage_error(error)
+            raise
+
+    def _structured_usage_error(self, error: UsageError) -> None:
+        """Exit through the output convention when the invocation asked
+        for machine output; a plain return keeps Click's own rendering."""
+        if "--id-only" in self._argv:
+            typer.echo(error.format_message(), err=True)
+            raise SystemExit(EXIT_USAGE)
+        if "--json" in self._argv:
+            typer.echo(json.dumps(click_usage_payload(error), indent=2))
+            raise SystemExit(EXIT_USAGE)
+
+
 app = typer.Typer(
     name="ade",
-    cls=LedgerGroup,
+    cls=AdeGroup,
     no_args_is_help=True,
     add_completion=False,
     help="CLI for Agentic Document Extraction (ADE) — parse and extract over "

@@ -256,7 +256,7 @@ def test_fresh_extract_d_runs_a_standalone_parse_then_references_it(
     assert payload["parse_job_item_id"] == parse_id
     assert payload["parsed_first"] == {
         "job_item_id": parse_id,
-        "job_id": JOB_ID,
+        "run_id": JOB_ID,
         "version": MODEL_VERSION,
         "credits": 2.5,
         "tier": "priority",
@@ -406,7 +406,7 @@ def test_force_reextracts_without_reparsing(cli, document, schema_file):
     # --force is extract's consent to re-bill the extraction; the
     # referenced parse is untouched (its own --force lives on `parse`).
     assert payload["job_item_id"] == first["job_item_id"]
-    assert payload["job_id"] == "extract-0002"
+    assert payload["run_id"] == "extract-0002"
     assert len(parse_posts(cli)) == 1
     assert len(extract_posts(cli)) == 2
 
@@ -423,7 +423,7 @@ def test_interrupted_parse_phase_leaves_a_resumable_parse_item(
     assert first.exit_code == 3  # pending is a normal outcome
     payload = json.loads(first.stdout)
     assert payload["status"] == "pending"
-    assert payload["job_id"] == JOB_ID
+    assert payload["run_id"] == JOB_ID
     parse_id = default_parse_item_id(document)
     assert payload["job_item_id"] == parse_id  # the item awaiting work
 
@@ -464,7 +464,7 @@ def test_plain_parse_resumes_the_parse_first_pending_job_too(
     resumed = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
 
     assert resumed.exit_code == 0
-    assert json.loads(resumed.stdout)["job_id"] == JOB_ID
+    assert json.loads(resumed.stdout)["run_id"] == JOB_ID
     assert len(parse_posts(cli)) == 1  # joined, never resubmitted
 
 
@@ -484,7 +484,7 @@ def test_interrupt_during_the_extract_phase_never_reparses_on_resume(
     )
     assert first.exit_code == 3
     payload = json.loads(first.stdout)
-    assert payload["job_id"] == "extract-0001"
+    assert payload["run_id"] == "extract-0001"
 
     # The re-run reuses the published parse item and rejoins the recorded
     # extract job — one submit each, across both runs.

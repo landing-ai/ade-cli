@@ -134,7 +134,9 @@ def item_record(store: JobStore, item_id: str) -> dict:
         # Why an unreadable ticket couldn't be read (None elsewhere): the
         # diagnosis recorded when the guarantee rejected the result.
         "reason": current.get("reason"),
-        "job_id": current.get("job_id"),
+        # User-facing name of the server-side id; the ticket and commit
+        # record still spell it job_id on disk (store format is stable).
+        "run_id": current.get("job_id"),
         "params": current.get("params"),
         # Which environment the run addressed (part of the item id since
         # ADR-0003); falls back like source for records predating the field.
@@ -167,15 +169,29 @@ def item_record(store: JobStore, item_id: str) -> dict:
             # dangling render. Checked against the referenced directory
             # itself — a full rescan here would make listing N items O(N²).
             parse_item_id = ref.get("job_item_id")
-            record["parse"] = {
-                **ref,
-                "missing": not (
-                    parse_item_id
-                    and _is_item_dir(store.item_dir(parse_item_id))
-                ),
-            }
+            missing = not (
+                parse_item_id and _is_item_dir(store.item_dir(parse_item_id))
+            )
+            record["parse"] = {**ref, "missing": missing}
+            # Stale (CONTEXT.md): the referenced parse was --force re-parsed
+            # in place, so this extraction's spans index markdown that no
+            # longer exists. Compared against the parse item's *current*
+            # commit record — the ref pins the generation it ran against.
+            parse_run = (
+                (store.read_json(parse_item_id, "meta.json") or {}).get("job_id")
+                if not missing
+                else None
+            )
+            record["stale"] = bool(
+                ref.get("parse_job_id")
+                and parse_run
+                and parse_run != ref["parse_job_id"]
+            )
         else:
             record["parse"] = None
+            # Bring-your-own-markdown extractions have no parse to go stale
+            # against; the field is present so consumers can gate on it.
+            record["stale"] = False
     return record
 
 

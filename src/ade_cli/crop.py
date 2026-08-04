@@ -180,8 +180,9 @@ def crop(
         None,
         "-o",
         "--output",
-        help="PNG path for a single crop, or a directory for several "
-        "(default: the job item's crops/ dir).",
+        help="Where the crops land: a directory (a single crop lands "
+        "inside it too), or — for a single crop only — the PNG path "
+        "itself (default: the job item's crops/ dir).",
     ),
     dpi: int = typer.Option(DEFAULT_CROP_DPI, "--dpi", min=1, help="Render dpi."),
     open_image: bool = typer.Option(
@@ -230,7 +231,9 @@ def crop(
     # One drift check per invocation, not per element: the batch renders
     # from a single recorded source, and hashing it once is the whole cost.
     drift = source_drift_note(jobs.read_json(parse_item_id, "meta.json"))
-    directory = _batch_directory(jobs, item_id, output, as_json=as_json) if batch else None
+    directory, single_file = _crop_target(
+        jobs, item_id, output, dpi=dpi, batch=batch, as_json=as_json
+    )
 
     crops: list[dict] = []
     for record in selected:
@@ -241,9 +244,9 @@ def crop(
                 record,
                 dpi=dpi,
                 output=(
-                    directory / f"{record['id']}@{dpi}dpi.png"
-                    if directory is not None
-                    else output
+                    single_file
+                    if single_file is not None
+                    else directory / f"{record['id']}@{dpi}dpi.png"
                 ),
                 source_item_id=parse_item_id,
             )
@@ -274,17 +277,26 @@ def crop(
             }
         )
 
+    # One payload shape for every crop run (#157): count + directory +
+    # crops[], whether one element matched or many — a consumer never
+    # branches on how many elements a filter happened to select.
+    landed = (
+        Path(crops[0]["path"]).parent if single_file is not None else directory
+    )
+    payload = {
+        "status": "cropped",
+        "job_item_id": item_id,
+        "count": len(crops),
+        "directory": str(landed),
+        "crops": crops,
+        **({"warning": drift} if drift else {}),
+    }
     if not batch:
         single = crops[0]
         if open_image:
             webbrowser.open(Path(single["path"]).resolve().as_uri())
         emit(
-            {
-                "status": "cropped",
-                "job_item_id": item_id,
-                **single,
-                **({"warning": drift} if drift else {}),
-            },
+            payload,
             (
                 f"Cropped {single['element_id']} ({single['type']}, page "
                 f"{single['page']}) -> {single['path']}"
@@ -295,10 +307,9 @@ def crop(
         )
         return
 
-    assert directory is not None
     if open_image and crops:
         # One window, not N: the directory the batch landed in.
-        webbrowser.open(directory.resolve().as_uri())
+        webbrowser.open(landed.resolve().as_uri())
     lines = [
         f"  {crop['element_id']:<14}  {crop['type']:<10}  p{crop['page']}  "
         f"{crop['width']}x{crop['height']} px  -> {Path(crop['path']).name}"
@@ -306,19 +317,12 @@ def crop(
     ]
     header = (
         f"Cropped {len(crops)} element(s) from job item {item_id} @ {dpi} dpi "
-        f"-> {tilde(directory)}/"
+        f"-> {tilde(landed)}/"
         if crops
         else "No elements matched; nothing cropped."
     )
     emit(
-        {
-            "status": "cropped",
-            "job_item_id": item_id,
-            "count": len(crops),
-            "directory": str(directory),
-            "crops": crops,
-            **({"warning": drift} if drift else {}),
-        },
+        payload,
         "\n".join(
             [header, *lines]
             + ([f"  warning: {drift}"] if drift and crops else [])
@@ -327,14 +331,28 @@ def crop(
     )
 
 
-def _batch_directory(
-    jobs: store.JobStore, item_id: str, output: Path | None, *, as_json: bool
-) -> Path:
-    """Where a batch lands: the item's ``crops/`` dir, or ``-o`` read as a
-    directory. ``-o`` naming an existing *file* is a usage error rather
-    than eleven crops overwriting each other at one path."""
+def _crop_target(
+    jobs: store.JobStore,
+    item_id: str,
+    output: Path | None,
+    *,
+    dpi: int,
+    batch: bool,
+    as_json: bool,
+) -> tuple[Path, Path | None]:
+    """Where the crops land, as ``(directory, single file or None)``: the
+    item's ``crops/`` dir by default; ``-o`` naming a directory lands the
+    crop(s) inside it in either mode (#156 — a directory target used to
+    crash single crops with IsADirectoryError); a single crop's ``-o`` may
+    name the PNG path itself. ``-o`` naming an existing *file* is a usage
+    error for a batch rather than N crops overwriting each other."""
     if output is None:
-        return jobs.item_dir(item_id) / "crops"
+        return jobs.item_dir(item_id) / "crops", None
+    if output.is_dir():
+        return output, None
+    if not batch:
+        # A single crop's -o names the PNG file to write.
+        return output.parent, output
     if output.is_file():
         message = (
             f"-o {output} is a file; a batch crop writes several PNGs, so "
@@ -347,4 +365,5 @@ def _batch_directory(
             as_json=as_json,
             code=EXIT_USAGE,
         )
-    return output
+    # A batch -o that names nothing yet is a directory to create.
+    return output, None

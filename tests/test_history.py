@@ -123,7 +123,7 @@ def test_history_list_shows_a_parse_item_as_a_full_record(cli, document):
         "options": {},
         "tier": "priority",
     }
-    assert record["job_id"] == "job-0001"
+    assert record["run_id"] == "job-0001"
     assert record["submitted_at"] is not None
     assert record["completed_at"] is not None
     # Artifact index: everything a consumer can read from the store path.
@@ -193,14 +193,23 @@ def test_an_empty_schema_counts_zero_fields_and_no_metadata_counts_nothing(
     cli, document, tmp_path
 ):
     parse_id = parse_file(cli, document)
-    empty = tmp_path / "empty-schema.json"
-    empty.write_text(json.dumps({"type": "object", "properties": {}}))
-    extract_id = extract_item(cli, parse_id, empty)
+    schema = tmp_path / "schema.json"
+    schema.write_text(
+        json.dumps({"type": "object", "properties": {"total": {"type": "string"}}})
+    )
+    extract_id = extract_item(cli, parse_id, schema)
+    # An empty-properties schema can no longer be *submitted* (#154 blocks
+    # it before the API call), but items extracted by older CLI versions
+    # can still hold one — rewrite the commit record to that legacy shape.
+    meta_path = cli.home / "jobs" / extract_id / "meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta["schema"] = {"type": "object", "properties": {}}
+    meta_path.write_text(json.dumps(meta))
     # A pending extract has no commit record yet — nothing to count.
     cli.transport.respond(202, {"job_id": "extract-0002"})
     other = tmp_path / "other-schema.json"
     other.write_text(
-        json.dumps({"type": "object", "properties": {"total": {"type": "string"}}})
+        json.dumps({"type": "object", "properties": {"amount": {"type": "string"}}})
     )
     pending = cli.invoke(
         "extract", parse_id, "--schema", str(other), "--wait", "0", "--json",
@@ -372,8 +381,8 @@ def test_history_states_derive_from_tickets_zero_api_calls(cli, tmp_path):
     result = cli.invoke("history", "list", "--json")
 
     by_state = {r["state"]: r for r in json.loads(result.stdout)}
-    assert by_state["pending"]["job_id"] == "job-pend"
-    assert by_state["failed"]["job_id"] == "job-fail"
+    assert by_state["pending"]["run_id"] == "job-pend"
+    assert by_state["failed"]["run_id"] == "job-fail"
     assert len(cli.transport.requests) == seen_requests
 
 
@@ -630,3 +639,66 @@ def test_unknown_and_ambiguous_ids_error_with_candidates(cli, tmp_path):
     by_path = cli.invoke("history", "clear", str(existing), "--json")
     assert by_path.exit_code == 1
     assert json.loads(by_path.stdout)["error"] == "unknown_id"
+
+
+# --- stale extractions (#158): parse --force marks dependents ---------------
+
+
+def force_reparse(cli, document, *, job_id="job-0002"):
+    cli.transport.respond(202, {"job_id": job_id})
+    cli.transport.respond(200, completed_job(job_id=job_id))
+    result = cli.invoke("parse", "-d", str(document), "--force", "--json", env=AUTH_ENV)
+    assert result.exit_code == 0, result.stdout
+
+
+def test_forced_reparse_marks_referencing_extracts_stale_in_history(
+    cli, document, schema_file
+):
+    parse_id = parse_file(cli, document)
+    extract_id = extract_item(cli, parse_id, schema_file)
+
+    listed = cli.invoke("history", "list", "--json")
+    records = {r["job_item_id"]: r for r in json.loads(listed.stdout)}
+    assert records[extract_id]["stale"] is False
+
+    force_reparse(cli, document)
+
+    listed = cli.invoke("history", "list", "--json")
+    records = {r["job_item_id"]: r for r in json.loads(listed.stdout)}
+    assert records[extract_id]["stale"] is True
+    assert "stale" not in records[parse_id]  # a parse item never stales
+
+    human = cli.invoke("history", "list")
+    assert "(stale)" in human.stdout
+    assert "re-run `ade extract`" in human.stdout
+
+
+def test_stale_mark_rides_into_the_sidebar_read_model(
+    cli, document, schema_file
+):
+    parse_id = parse_file(cli, document)
+    extract_id = extract_item(cli, parse_id, schema_file)
+    force_reparse(cli, document)
+
+    cli.invoke("history", "list", "--json")  # rewrites history.js
+
+    items = {item["id"]: item for item in history_js_items(cli)}
+    assert items[extract_id]["stale"] is True
+    assert items[parse_id]["stale"] is False
+
+
+def test_markdown_extract_items_never_read_as_stale(cli, tmp_path, schema_file):
+    md = tmp_path / "notes.md"
+    md.write_text("# Notes\n\nTotal: 42\n")
+    cli.transport.respond(202, {"job_id": "extract-0001"})
+    cli.transport.respond(200, completed_extract_job())
+    result = cli.invoke(
+        "extract", "--markdown", str(md), "--schema", str(schema_file),
+        "--json", env=AUTH_ENV,
+    )
+    assert result.exit_code == 0, result.stdout
+    extract_id = json.loads(result.stdout)["job_item_id"]
+
+    listed = cli.invoke("history", "list", "--json")
+    records = {r["job_item_id"]: r for r in json.loads(listed.stdout)}
+    assert records[extract_id]["stale"] is False

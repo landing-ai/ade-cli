@@ -19,6 +19,14 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 import typer
+# typer vendors its click fork (no top-level `click` ships with it);
+# these are the concrete exception types its validation layer raises.
+from typer._click.exceptions import (
+    BadParameter,
+    MissingParameter,
+    NoSuchOption,
+    UsageError,
+)
 
 JSON_FLAG = typer.Option(False, "--json", help="Emit one stable JSON object on stdout.")
 ID_ONLY_FLAG = typer.Option(
@@ -109,6 +117,35 @@ def emit(payload: Any, human: str, *, as_json: bool) -> None:
         typer.echo(json.dumps(payload, indent=2))
     else:
         typer.echo(human)
+
+
+def click_usage_payload(error: UsageError) -> dict:
+    """One machine payload for a Click validation failure — the ``--json``
+    contract extended to errors raised before any command body runs
+    (#155): a stable ``error`` code plus the same message Click renders.
+    The generic code is ``usage``; the recognizable subtypes get their
+    own so scripts can branch without parsing the message."""
+    payload: dict = {"error": "usage", "message": error.format_message()}
+    param = getattr(error, "param", None)
+    spelled = None
+    if param is not None:
+        opts = [*getattr(param, "opts", []), *getattr(param, "secondary_opts", [])]
+        spelled = ", ".join(opts) or getattr(param, "name", None)
+    if isinstance(error, NoSuchOption):
+        payload["error"] = "no_such_option"
+        payload["option"] = error.option_name
+    elif isinstance(error, MissingParameter):
+        kind = getattr(param, "param_type_name", "parameter")
+        payload["error"] = (
+            "missing_option" if kind == "option" else "missing_argument"
+        )
+        if spelled:
+            payload["param"] = spelled
+    elif isinstance(error, BadParameter):
+        payload["error"] = "bad_parameter"
+        if spelled:
+            payload["param"] = spelled
+    return payload
 
 
 def exit_with(payload: dict, human: str, *, as_json: bool, code: int) -> NoReturn:

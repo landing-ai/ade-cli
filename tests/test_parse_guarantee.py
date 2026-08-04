@@ -44,7 +44,7 @@ def test_rerunning_a_completed_parse_makes_zero_http_calls(cli, document):
     assert len(cli.transport.requests) == seen  # served from disk
     payload = json.loads(again.stdout)
     assert payload["status"] == "parsed"
-    assert payload["job_id"] == JOB_ID  # summary still traceable to the bill
+    assert payload["run_id"] == JOB_ID  # summary still traceable to the bill
 
 
 def test_exact_rerun_prints_the_already_parsed_notice(cli, document):
@@ -69,7 +69,7 @@ def test_force_reparses_a_completed_parse(cli, document):
     result = cli.invoke("parse", "-d", str(document), "--force", "--json", env=AUTH_ENV)
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == "job-0002"
+    assert json.loads(result.stdout)["run_id"] == "job-0002"
     assert len(posts(cli)) == 2
 
 
@@ -82,7 +82,7 @@ def test_rerun_resumes_a_pending_job_without_a_second_submit(cli, document):
     second = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
 
     assert second.exit_code == 0
-    assert json.loads(second.stdout)["job_id"] == JOB_ID
+    assert json.loads(second.stdout)["run_id"] == JOB_ID
     assert len(posts(cli)) == 1  # exactly one submit across both runs
 
 
@@ -129,7 +129,7 @@ def test_a_submitless_ticket_is_reclaimed(cli, document):
     result = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == "job-0002"
+    assert json.loads(result.stdout)["run_id"] == "job-0002"
 
 
 def test_pending_ticket_for_different_params_is_not_resumed(cli, document):
@@ -144,7 +144,7 @@ def test_pending_ticket_for_different_params_is_not_resumed(cli, document):
     )
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == "job-0002"
+    assert json.loads(result.stdout)["run_id"] == "job-0002"
     assert len(posts(cli)) == 2  # different guarantee, deliberate new submit
 
 
@@ -160,7 +160,7 @@ def test_failed_parse_is_reported_once_then_resubmitted_fresh(cli, document):
     second = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
 
     assert second.exit_code == 0
-    assert json.loads(second.stdout)["job_id"] == "job-0002"
+    assert json.loads(second.stdout)["run_id"] == "job-0002"
     assert len(posts(cli)) == 2  # one fresh resubmit, not a resume
 
 
@@ -174,7 +174,7 @@ def test_expired_pending_job_is_treated_as_absent_and_resubmitted(cli, document)
     result = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == "job-0002"
+    assert json.loads(result.stdout)["run_id"] == "job-0002"
     assert len(posts(cli)) == 2
 
 
@@ -189,7 +189,7 @@ def test_poll_5xx_is_retried_like_a_pending_tick(cli, document):
     result = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == JOB_ID
+    assert json.loads(result.stdout)["run_id"] == JOB_ID
     assert len(posts(cli)) == 1  # the submit POST is never blindly retried
     assert 1.0 in cli.clock.sleeps  # backed off like a pending tick
 
@@ -208,7 +208,7 @@ def test_poll_only_5xx_exits_pending_at_the_wait_budget(cli, document):
     assert result.exit_code == 3
     payload = json.loads(result.stdout)
     assert payload["status"] == "pending"
-    assert payload["job_id"] == JOB_ID
+    assert payload["run_id"] == JOB_ID
     assert sum(cli.clock.sleeps) <= 5  # never sleeps past the promised budget
     # Ticket intact: the next invocation re-joins the same job for free.
     item_dir = next((cli.home / "jobs").iterdir())
@@ -296,7 +296,7 @@ def test_failed_reparse_does_not_cache_hit_the_old_parse(cli, document):
     result = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == "job-0003"
+    assert json.loads(result.stdout)["run_id"] == "job-0003"
     assert len(posts(cli)) == 3
 
 
@@ -344,7 +344,7 @@ def test_mixed_generation_artifacts_are_not_served_from_cache(cli, document):
     result = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == "job-0002"  # re-parsed
+    assert json.loads(result.stdout)["run_id"] == "job-0002"  # re-parsed
     assert len(posts(cli)) == 2
 
 
@@ -380,7 +380,7 @@ def test_stale_404_poller_joins_the_fresh_job_instead_of_stealing_it(cli, docume
     result = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == "job-0002"  # joined, not stolen
+    assert json.loads(result.stdout)["run_id"] == "job-0002"  # joined, not stolen
     assert len(posts(cli)) == 1  # the other poller's claim was never clobbered
 
 
@@ -518,7 +518,7 @@ def test_unreadable_ticket_recovers_by_repolling_the_same_job(cli, document):
     result = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == JOB_ID
+    assert json.loads(result.stdout)["run_id"] == JOB_ID
     assert len(posts(cli)) == 1
 
     # ...and the published parse serves from disk: unreadable never leaves
@@ -585,7 +585,7 @@ def test_unsupported_schema_advises_upgrade_and_rerun_repolls_free(cli, document
     second = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
 
     assert second.exit_code == 0
-    assert json.loads(second.stdout)["job_id"] == JOB_ID
+    assert json.loads(second.stdout)["run_id"] == JOB_ID
     assert len(posts(cli)) == 1  # billed once across all runs
 
 
@@ -632,7 +632,7 @@ def test_force_abandons_an_unsupported_schema_job_and_resubmits(cli, document):
     result = cli.invoke("parse", "-d", str(document), "--force", "--json", env=AUTH_ENV)
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == "job-0002"
+    assert json.loads(result.stdout)["run_id"] == "job-0002"
     assert len(posts(cli)) == 2  # exactly one deliberate resubmit
 
 
@@ -649,7 +649,7 @@ def test_unreadable_ticket_with_different_params_resubmits_deliberately(cli, doc
     )
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["job_id"] == "job-0002"
+    assert json.loads(result.stdout)["run_id"] == "job-0002"
     assert len(posts(cli)) == 2  # different guarantee, deliberate new submit
 
 

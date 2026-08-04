@@ -168,7 +168,7 @@ RESULTS: dict[str, dict] = {
         "shape": "object",
         "keys": [
             ("status", "'parsed'"),
-            ("job_id", "server job id"),
+            ("run_id", "server-side run id (the wire's job_id)"),
             ("job_item_id", "store key every other verb takes"),
             ("environment", "resolved environment"),
             ("version", "resolved parse model version"),
@@ -188,7 +188,7 @@ RESULTS: dict[str, dict] = {
         "shape": "object",
         "keys": [
             ("status", "'extracted'"),
-            ("job_id", "server job id"),
+            ("run_id", "server-side run id (the wire's job_id)"),
             ("job_item_id", "this extraction's own job item"),
             ("parse_job_item_id", "the parse it references (absent for markdown)"),
             ("environment", "resolved environment"),
@@ -229,18 +229,14 @@ RESULTS: dict[str, dict] = {
         "keys": [
             ("status", "'cropped'"),
             ("job_item_id", "the addressed item (crops land under its crops/)"),
-            ("element_id", "single-crop mode: the element cropped"),
-            ("type / page / box", "single-crop mode: what was cropped, where"),
-            ("dpi", "render dpi"),
-            ("path", "single-crop mode: the PNG written"),
-            ("width / height", "single-crop mode: pixel dimensions"),
-            ("count", "batch mode: how many PNGs were written"),
-            ("directory", "batch mode: where they landed"),
-            ("crops", "batch mode: one record per PNG (element_id, type, "
+            ("count", "how many PNGs were written"),
+            ("directory", "where they landed"),
+            ("crops", "one record per PNG (element_id, type, "
              "page, box, dpi, path, width, height)"),
         ],
-        "note": "One --element-id yields the flat single-crop object; any "
-        "filter (--type/--page/--all) yields the batch object with crops[].",
+        "note": "One shape whatever matched: a single --element-id is "
+        "count 1 with one crops[] record; a filter (--type/--page/--all) "
+        "matching nothing is count 0 with crops [].",
     },
     "view": {
         "shape": "object",
@@ -263,9 +259,12 @@ RESULTS: dict[str, dict] = {
             ("job_item_id", "the item"),
             ("kind", "parse | extract"),
             ("state", "derived from the ticket and artifacts on disk"),
+            ("run_id", "server-side run id of the recorded generation"),
             ("source", "document path, URL, or markdown file"),
             ("params", "the invocation params, verbatim"),
             ("parse", "extract items: the referenced parse (and whether it is missing)"),
+            ("stale", "extract items: true when the referenced parse was "
+             "--force re-run after this extraction"),
             ("created_at / completed_at", "epoch seconds (null when unknown)"),
         ],
     },
@@ -370,9 +369,9 @@ EXIT_STATES = [
     {
         "code": EXIT_PENDING,
         "name": "pending",
-        "meaning": "The wait budget expired while the job continues "
+        "meaning": "The wait budget expired while the run continues "
         "server-side — a normal outcome, not an error. The payload carries "
-        "a 'pending' status plus the job_id and job_item_id; re-run the same "
+        "a 'pending' status plus the run_id and job_item_id; re-run the same "
         "command to resume polling (never resubmits, never re-bills).",
     },
     {
@@ -448,8 +447,8 @@ STORE_LAYOUT = [
     },
     {
         "path": "  job.json",
-        "what": "claim ticket: server job_id, tier, state — what a re-run "
-        "resumes",
+        "what": "claim ticket: the server-side run id (spelled job_id on "
+        "disk), tier, state — what a re-run resumes",
     },
     {
         "path": "  " + " / ".join(PARSE_ARTIFACTS),

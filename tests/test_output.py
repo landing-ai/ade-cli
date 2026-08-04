@@ -108,3 +108,56 @@ def test_id_only_does_not_leak_into_the_next_in_process_run(cli, document):
     payload = json.loads(cli.invoke("history", "list", "--json").stdout)
 
     assert isinstance(payload, list) and payload
+
+
+# --- Click validation errors honor the machine output modes (#155) --------
+
+
+def test_json_covers_click_validation_errors_missing_option(cli):
+    """`--json` must yield JSON on stdout for *every* error — including the
+    ones Click raises before any command body runs."""
+    result = cli.invoke("extract", "some-item-id", "--json")
+
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "missing_option"
+    assert payload["param"] == "--schema"
+    assert "--schema" in payload["message"]
+
+
+def test_json_covers_click_validation_errors_bad_value(cli, tmp_path):
+    result = cli.invoke(
+        "parse", "-d", str(tmp_path / "does-not-exist.pdf"), "--json"
+    )
+
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "bad_parameter"
+    assert "does not exist" in payload["message"]
+    assert "--document" in payload["param"]
+
+
+def test_json_covers_click_validation_errors_unknown_flag(cli):
+    result = cli.invoke("history", "list", "--no-such-flag", "--json")
+
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "no_such_option"
+    assert payload["option"] == "--no-such-flag"
+
+
+def test_click_validation_without_json_keeps_the_usage_rendering(cli):
+    """No --json, no JSON: the default human rendering stays exactly as
+    Click/typer ships it."""
+    result = cli.invoke("extract", "some-item-id")
+
+    assert result.exit_code == 2
+    assert not result.stdout.strip().startswith("{")
+
+
+def test_id_only_keeps_click_validation_errors_off_stdout(cli):
+    result = cli.invoke("extract", "some-item-id", "--id-only")
+
+    assert result.exit_code == 2
+    assert result.stdout.strip() == ""
+    assert "--schema" in result.stderr

@@ -149,6 +149,9 @@ def _sidebar_item(store: JobStore, record: dict) -> dict:
         # same degradation `history list` renders — a parent id that no
         # longer exists would make consumers mis-group or drop it.
         "parent": None if ref.get("missing") else ref.get("job_item_id"),
+        # Stale extraction (its parse was --force re-run): the sidebar
+        # renders an amber mark with the explanation on hover.
+        "stale": bool(record.get("stale")),
         "viewer": viewer,
         # Store-relative, so a sidebar loaded from any jobs/<id>/view.html
         # can navigate to its siblings.

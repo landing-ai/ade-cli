@@ -11,11 +11,11 @@ A source file or URL fed to a run. It is one component of identity, not the whol
 _Avoid_: file (ambiguous with store artifacts)
 
 **Job item**:
-One parse or extract invocation and everything it produced, the store's unit. Its identity is the invocation: verb × environment × source path × document bytes × params (URL sources: verb × environment × URL × params — the CLI never sees the bytes) — any component changing mints a sibling item; one environment's result never serves another's request.
-_Avoid_: doc (retired), run (informal)
+One parse or extract invocation and everything it produced, the store's unit. Its identity is the invocation: verb × environment × source path × document bytes × params (URL sources: verb × environment × URL × params — the CLI never sees the bytes) — any component changing mints a sibling item; one environment's result never serves another's request. Distinct from the *run* (the server-side work a job item records).
+_Avoid_: doc (retired)
 
 **Job item id**:
-The CLI's local primary key for a job item, derived from the invocation identity. Commands take it (or an unambiguous prefix) — it is distinct from the server's `job_id` and the parse-trailer `doc_id`.
+The CLI's local primary key for a job item, derived from the invocation identity. Commands take it (or an unambiguous prefix) — it is distinct from the server-side run id and the parse-trailer `doc_id`.
 _Avoid_: doc id (retired), REF (retired — paths are accepted only by the convenience verbs)
 
 **Variant**:
@@ -28,15 +28,16 @@ _Avoid_: live parse (retired — "last parse wins" is gone)
 A command that ensures a state rather than fires an action — idempotent, resumable, interrupt-safe. `parse` means "ensure parsed"; `extract` means "ensure extracted".
 _Avoid_: action, request (for these commands)
 
-**Job**:
-The server-side unit of async work, minted at submit and polled by id. No cancel exists; a submitted job always completes and bills.
+**Run**:
+The server-side unit of async work, minted at submit and polled by id. No cancel exists; a submitted run always completes and bills. User-facing surfaces (summaries, `--json` payloads: `run_id`) say *run*; the wire contract and the on-disk ticket/commit records still spell the id `job_id`.
+_Avoid_: job (renamed 2026-08 — customers read "job" as the job item; "job" now appears only inside "job item")
 
 **Claim ticket**:
-The local record that a job is in flight for a job item, written atomically before submit. Re-running the same command resumes the ticket's job instead of resubmitting.
+The local record that a run is in flight for a job item, written atomically before submit. Re-running the same command resumes the ticket's run instead of resubmitting.
 _Avoid_: lock, lease
 
 **Wait**:
-The poll-phase clock of a guarantee command. Wait expiry leaves the job running and is a normal pending outcome, not an error.
+The poll-phase clock of a guarantee command. Wait expiry leaves the run going server-side and is a normal pending outcome, not an error.
 _Avoid_: timeout (reserved for internal transport guards)
 
 **Service tier**:
@@ -46,10 +47,10 @@ The async execution lane: `priority` (full price, fast lane) or `standard` (half
 An extraction whose referenced parse was replaced in place by a forced re-parse — the one remaining cause. Its spans index markdown that no longer exists; it is kept and badged, never silently served. Variants never stale anything.
 
 **Expired**:
-A pending job whose server retention has passed (polls 404). Treated as absent: the next run resubmits fresh.
+A pending run whose server retention has passed (polls 404). Treated as absent: the next invocation resubmits fresh.
 
 **Unreadable**:
-A job that completed server-side but whose poll payload carried no inline result this CLI can read (URL delivery, or an unsupported response contract). Recorded on the claim ticket; re-running re-polls the same job — never resubmits, since the completed job already billed.
+A run that completed server-side but whose poll payload carried no inline result this CLI can read (URL delivery, or an unsupported response contract). Recorded on the claim ticket; re-running re-polls the same run — never resubmits, since the completed run already billed.
 
 ### Parse results
 
@@ -70,8 +71,8 @@ A bounding box `{xmin, ymin, xmax, ymax}` in normalized page coordinates — `[0
 ### Extraction results
 
 **Extraction**:
-A schema-driven structured read of one parse's markdown. Always its own job item, which either references the parse job it ran against (running one first if none exists — every parse is a reusable job item) or carries bring-your-own markdown.
-_Avoid_: embedded parse (retired — a parse triggered by extract is a normal, reusable parse job)
+A schema-driven structured read of one parse's markdown. Always its own job item, which either references the parse job item it ran against (running one first if none exists — every parse is a reusable job item) or carries bring-your-own markdown.
+_Avoid_: embedded parse (retired — a parse triggered by extract is a normal, reusable parse job item)
 
 **Evidence**:
 The local field→boxes join: extraction spans resolved through elements to pages and boxes, computed offline from stored artifacts.
@@ -91,7 +92,7 @@ The environment one invocation runs against, resolved fresh every command
 stored about the choice — there is no "current" environment — and
 credentials are stored and read per environment. The environment is part
 of job-item identity, and an extract over a parse item inherits the
-item's environment (its server-side parse job exists nowhere else).
+item's environment (its server-side parse run exists nowhere else).
 _Avoid_: active environment, current env, switching (nothing persists to switch)
 
 **Login verification**:

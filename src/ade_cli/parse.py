@@ -298,7 +298,10 @@ def parse(
         )
         payload = {
             "status": "parsed",
-            "job_id": job_id,
+            # The server-side run id — user-facing name for what the wire
+            # (and the stored ticket/meta) still spell job_id: "run" names
+            # the server work, "job item" names the local store unit.
+            "run_id": job_id,
             "job_item_id": item_id,
             "environment": resolved.environment,
             "version": meta["model_version"],
@@ -332,7 +335,7 @@ def parse(
                     or resolved.endpoint_source == "env"
                     else ""
                 )
-                + f"\n  job:     {job_id}"
+                + f"\n  run:     {job_id}"
                 f"\n  model:   {meta['model_version']}"
                 f"\n  pages:   {meta['page_count']} ({failed_note})"
                 f"\n  credits: {billing['total_credits']} ({billing['service_tier']})"
@@ -426,9 +429,9 @@ def ensure_parsed(
         fresh=force,
         stderr_tty=ports.stderr_is_tty(),
         interrupted_no_job_hint=(
-            "Interrupted before a job was recorded; re-run the same "
+            "Interrupted before a run was recorded; re-run the same "
             "command to continue. If the interrupt landed mid-submit, "
-            "the server may have accepted the job anyway and the re-run "
+            "the server may have accepted the run anyway and the re-run "
             "may bill a second parse of the same bytes (no idempotency "
             "key exists yet — see the filed platform ask)."
         ),

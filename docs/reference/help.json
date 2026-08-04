@@ -491,8 +491,8 @@
             "what": "'parsed'"
           },
           {
-            "key": "job_id",
-            "what": "server job id"
+            "key": "run_id",
+            "what": "server-side run id (the wire's job_id)"
           },
           {
             "key": "job_item_id",
@@ -649,8 +649,8 @@
             "what": "'extracted'"
           },
           {
-            "key": "job_id",
-            "what": "server job id"
+            "key": "run_id",
+            "what": "server-side run id (the wire's job_id)"
           },
           {
             "key": "job_item_id",
@@ -755,6 +755,10 @@
             "what": "derived from the ticket and artifacts on disk"
           },
           {
+            "key": "run_id",
+            "what": "server-side run id of the recorded generation"
+          },
+          {
             "key": "source",
             "what": "document path, URL, or markdown file"
           },
@@ -765,6 +769,10 @@
           {
             "key": "parse",
             "what": "extract items: the referenced parse (and whether it is missing)"
+          },
+          {
+            "key": "stale",
+            "what": "extract items: true when the referenced parse was --force re-run after this extraction"
           },
           {
             "key": "created_at / completed_at",
@@ -1067,7 +1075,7 @@
           "metavar": "PATH",
           "required": false,
           "default": null,
-          "help": "PNG path for a single crop, or a directory for several (default: the job item's crops/ dir)."
+          "help": "Where the crops land: a directory (a single crop lands inside it too), or \u2014 for a single crop only \u2014 the PNG path itself (default: the job item's crops/ dir)."
         },
         {
           "flags": "--dpi",
@@ -1097,39 +1105,19 @@
             "what": "the addressed item (crops land under its crops/)"
           },
           {
-            "key": "element_id",
-            "what": "single-crop mode: the element cropped"
-          },
-          {
-            "key": "type / page / box",
-            "what": "single-crop mode: what was cropped, where"
-          },
-          {
-            "key": "dpi",
-            "what": "render dpi"
-          },
-          {
-            "key": "path",
-            "what": "single-crop mode: the PNG written"
-          },
-          {
-            "key": "width / height",
-            "what": "single-crop mode: pixel dimensions"
-          },
-          {
             "key": "count",
-            "what": "batch mode: how many PNGs were written"
+            "what": "how many PNGs were written"
           },
           {
             "key": "directory",
-            "what": "batch mode: where they landed"
+            "what": "where they landed"
           },
           {
             "key": "crops",
-            "what": "batch mode: one record per PNG (element_id, type, page, box, dpi, path, width, height)"
+            "what": "one record per PNG (element_id, type, page, box, dpi, path, width, height)"
           }
         ],
-        "note": "One --element-id yields the flat single-crop object; any filter (--type/--page/--all) yields the batch object with crops[]."
+        "note": "One shape whatever matched: a single --element-id is count 1 with one crops[] record; a filter (--type/--page/--all) matching nothing is count 0 with crops []."
       },
       "band": "local read models"
     }
@@ -1240,7 +1228,7 @@
     {
       "code": 3,
       "name": "pending",
-      "meaning": "The wait budget expired while the job continues server-side \u2014 a normal outcome, not an error. The payload carries a 'pending' status plus the job_id and job_item_id; re-run the same command to resume polling (never resubmits, never re-bills)."
+      "meaning": "The wait budget expired while the run continues server-side \u2014 a normal outcome, not an error. The payload carries a 'pending' status plus the run_id and job_item_id; re-run the same command to resume polling (never resubmits, never re-bills)."
     },
     {
       "code": 4,
@@ -1273,7 +1261,7 @@
       },
       {
         "path": "  job.json",
-        "what": "claim ticket: server job_id, tier, state \u2014 what a re-run resumes"
+        "what": "claim ticket: the server-side run id (spelled job_id on disk), tier, state \u2014 what a re-run resumes"
       },
       {
         "path": "  parse.json / parse.md / elements.json",

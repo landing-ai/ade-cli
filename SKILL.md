@@ -109,9 +109,9 @@ terminal required either way.
 Every parse the CLI ever runs is a reusable job item. Given a document
 path, `extract -d FILE --schema …` reuses the latest completed parse of
 that path+content (logged in the summary; no parse billed). If none
-exists, it runs a **standalone parse job first** — a normal, top-level
+exists, it runs a **standalone parse first** — a normal, top-level
 parse item, exactly as if you had run `parse -d` — then the extraction
-referencing it: two billable jobs, both itemised. Repeat `extract -d`
+referencing it: two billable runs, both itemised. Repeat `extract -d`
 runs of the same file then reuse that parse, so it bills exactly once.
 
 Prefer the explicit two-step (`parse -d`, then `extract JOB_ID`) when
@@ -122,10 +122,10 @@ visible.
 
 Wait expiry is a normal outcome, not an error. If the poll budget
 (`--wait`, default 600s) runs out, the command exits with code 3 and a
-`{"status": "pending", "job_id": …, "job_item_id": …}` payload while the
-job continues server-side (submitted work always completes and bills —
+`{"status": "pending", "run_id": …, "job_item_id": …}` payload while the
+run continues server-side (submitted work always completes and bills —
 there is no cancel). **The recovery gesture is always the same command,
-re-run.** A re-run joins the recorded job; it never resubmits and never
+re-run.** A re-run joins the recorded run; it never resubmits and never
 re-bills. Interrupts (Ctrl-C) stop the waiting, not the work — same
 gesture. `--wait 0` submits and returns immediately.
 
@@ -133,7 +133,7 @@ Submit-and-return, then collect later — the pending payload carries the
 id too, so this works in both steps:
 
 ```
-JOB=$(ade parse -d report.pdf --wait 0 --id-only)   # exit 3, job running
+JOB=$(ade parse -d report.pdf --wait 0 --id-only)   # exit 3, run continuing
 ade parse -d report.pdf --json                       # re-run: resumes, never re-bills
 ```
 
@@ -144,8 +144,8 @@ ade parse -d report.pdf --json                       # re-run: resumes, never re
 | 0 | ok | Success — the payload is on stdout. |
 | 1 | failed | The run failed or the target cannot serve the request. |
 | 2 | usage | The invocation itself was wrong; nothing was submitted. |
-| 3 | pending | Wait budget expired; the job continues server-side. Re-run the same command to resume. |
-| 4 | rate_limited | Submit was rate-limited and the wait budget ran out before a job existed; nothing billed. Re-run to retry. |
+| 3 | pending | Wait budget expired; the run continues server-side. Re-run the same command to resume. |
+| 4 | rate_limited | Submit was rate-limited and the wait budget ran out before a run existed; nothing billed. Re-run to retry. |
 
 ## Reading the store directly
 

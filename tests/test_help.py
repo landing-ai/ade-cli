@@ -300,7 +300,7 @@ def test_skill_teaches_the_reuse_posture():
     """Acceptance (#63): every parse is a reusable job item; a fresh
     `extract -d` runs a standalone parse first; repeat runs reuse it."""
     assert "reusable job item" in SKILL
-    assert "standalone parse job first" in SKILL
+    assert "standalone parse first" in SKILL
     assert "bills exactly once" in SKILL
 
 

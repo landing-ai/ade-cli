@@ -254,13 +254,15 @@ class Guarantee:
             self.progress.close()
             if job_id:
                 human = (
-                    f"Job {job_id} continues running server-side; re-run the "
+                    f"Run {job_id} continues server-side; re-run the "
                     "same command to resume waiting (it will never resubmit)."
                 )
             else:
                 human = self.interrupted_no_job_hint
             exit_with(
-                {"status": "pending", "job_id": job_id, **self.context},
+                # "run_id" is the user-facing name of the server-side id
+                # (the wire and the claim ticket still spell it job_id).
+                {"status": "pending", "run_id": job_id, **self.context},
                 human,
                 as_json=self.as_json,
                 code=EXIT_PENDING,
@@ -358,8 +360,8 @@ class Guarantee:
                     error = payload.get("error") or {}
                     reason = error.get("message") or error.get("code") or status
                     exit_with(
-                        {"status": status, "job_id": job_id, **self.context, "reason": reason},
-                        f"{self.noun} {status}: {reason} (job {job_id}).",
+                        {"status": status, "run_id": job_id, **self.context, "reason": reason},
+                        f"{self.noun} {status}: {reason} (run {job_id}).",
                         as_json=self.as_json,
                         code=EXIT_FAILED,
                     )
@@ -371,8 +373,8 @@ class Guarantee:
                     break
                 self.progress.close()
                 exit_with(  # a status this CLI doesn't know is never silent success
-                    {"error": "unexpected_status", "status": status, "job_id": job_id, **self.context},
-                    f"Unexpected job status {status!r} (job {job_id}); upgrade ade "
+                    {"error": "unexpected_status", "status": status, "run_id": job_id, **self.context},
+                    f"Unexpected run status {status!r} (run {job_id}); upgrade ade "
                     "(re-run the installer, or `uv tool upgrade ade-cli`) and retry.",
                     as_json=self.as_json,
                     code=EXIT_FAILED,
@@ -393,7 +395,7 @@ class Guarantee:
             output_url = payload.get("output_url")
             if output_url:
                 human = (
-                    f"Job {job_id} completed without an inline result; the "
+                    f"Run {job_id} completed without an inline result; the "
                     f"response carries output_url={output_url}, which "
                     "ade does not fetch."
                 )
@@ -402,7 +404,7 @@ class Guarantee:
                 # an up-to-date CLI is exactly what fails here. The endpoint
                 # simply hasn't promoted to the API release this CLI speaks.
                 human = (
-                    f"Job {job_id} completed, but {self.endpoint_label} "
+                    f"Run {job_id} completed, but {self.endpoint_label} "
                     "answered with the pre-cutover response contract "
                     "(top-level 'data' instead of 'result'). This CLI is "
                     "current; that API target has not promoted to the new "
@@ -412,7 +414,7 @@ class Guarantee:
                 )
             else:
                 human = (
-                    f"Job {job_id} completed without an inline result; the "
+                    f"Run {job_id} completed without an inline result; the "
                     f"response's top-level keys were: {', '.join(sorted(payload))}."
                 )
             # The diagnosis rides on the ticket: job.json is the durable
@@ -421,7 +423,7 @@ class Guarantee:
             exit_with(
                 {
                     "error": "missing_result",
-                    "job_id": job_id,
+                    "run_id": job_id,
                     **self.context,
                     "output_url": output_url,
                     "payload_keys": sorted(payload),
@@ -464,11 +466,11 @@ class Guarantee:
         exit_with(
             {
                 "error": "unsupported_result_schema",
-                "job_id": outcome.job_id,
+                "run_id": outcome.job_id,
                 **self.context,
                 "reason": problem,
             },
-            f"Job {outcome.job_id} completed, but its result does not match "
+            f"Run {outcome.job_id} completed, but its result does not match "
             f"the contract this CLI understands: {problem}. The API "
             "usually runs ahead of the CLI — upgrade ade (re-run the "
             "installer, or `uv tool upgrade ade-cli`), then re-run the "
@@ -610,7 +612,7 @@ class Guarantee:
                         # The new owner submits; we must not.
                         self.progress.close()
                         exit_with(
-                            {"status": "pending", "job_id": None, **self.context},
+                            {"status": "pending", "run_id": None, **self.context},
                             "Another process took over this guarantee; "
                             "re-run the same command to join it.",
                             as_json=self.as_json,
