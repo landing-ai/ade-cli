@@ -352,3 +352,34 @@ def test_concurrent_history_list_invocations_share_the_store_cleanly(
     # ...and the shared read model came out whole, not torn.
     text = (home / "history.js").read_text(encoding="utf-8")
     assert text.startswith("window.__ADE_HISTORY__ = ")
+
+
+def test_lock_acquisition_retries_when_a_clear_razes_the_directory(
+    tmp_path, monkeypatch
+):
+    """The other side of #160's deletion protocol: a mutator whose
+    ``lock()`` loses the item directory between its mkdir and the
+    lock-file open (a concurrent clear's husk removal) must re-create and
+    re-acquire, never crash with FileNotFoundError."""
+    jobs = jobstore.JobStore(tmp_path / "home")
+    real_exclusive = jobstore.exclusive
+    calls = {"n": 0}
+
+    @contextmanager
+    def racing_exclusive(path):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            # Simulate the clear winning the race: the directory (and so
+            # the lock file's parent) is gone by the time we open.
+            raise FileNotFoundError(2, "No such file or directory", str(path))
+        with real_exclusive(path):
+            yield
+
+    monkeypatch.setattr(jobstore, "exclusive", racing_exclusive)
+
+    entered = False
+    with jobs.lock("cafe0123abcd4567"):
+        entered = True
+        assert (jobs.item_dir("cafe0123abcd4567") / ".ticket.lock").exists()
+    assert entered
+    assert calls["n"] == 3  # two lost races, then a clean acquisition

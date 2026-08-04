@@ -120,11 +120,32 @@ class JobStore:
     def lock(self, item_id: str) -> Iterator[None]:
         """Interprocess mutex for this item's claim-ticket transitions (and
         live-artifact publication). flock is advisory, which suffices: every
-        mutator is this CLI. Never hold it across network calls."""
+        mutator is this CLI. Never hold it across network calls.
+
+        Acquisition retries when the directory vanishes between the mkdir
+        and the lock-file open — ``history clear`` deletes item dirs (the
+        lock file last, after release; see #160), and that window must
+        surface to a racing mutator as a clean re-acquire on a recreated
+        dir, never a FileNotFoundError crash. Bounded: two live processes
+        cannot ping-pong forever (clear deletes each dir once)."""
         d = self.item_dir(item_id)
-        d.mkdir(parents=True, exist_ok=True)
-        with exclusive(d / ".ticket.lock"):
+        for _ in range(100):
+            d.mkdir(parents=True, exist_ok=True)
+            acquired = exclusive(d / ".ticket.lock")
+            try:
+                acquired.__enter__()
+            except FileNotFoundError:
+                continue
+            break
+        else:  # pragma: no cover - would need 100 perfectly timed clears
+            raise FileNotFoundError(
+                f"could not acquire the item lock for {item_id}: the "
+                "directory kept disappearing during acquisition"
+            )
+        try:
             yield
+        finally:
+            acquired.__exit__(None, None, None)
 
     @contextmanager
     def store_lock(self) -> Iterator[None]:
