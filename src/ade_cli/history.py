@@ -36,15 +36,35 @@ ASC_FLAG = typer.Option(
     "the viewer sidebar.",
 )
 
+# The listing cap: a long-lived store holds thousands of items, and an
+# uncapped default would drown the recent runs the listing exists to
+# answer for. The cap always keeps the NEWEST items — with --asc they
+# just present oldest-first (a chronological tail, like `tail -100`).
+DEFAULT_LIST_LIMIT = 100
+LIMIT_FLAG = typer.Option(
+    DEFAULT_LIST_LIMIT,
+    "--limit",
+    min=1,
+    help=f"Keep only the newest N items (default {DEFAULT_LIST_LIMIT}), "
+    "whatever the order; --all lifts the cap.",
+)
+LIST_ALL_FLAG = typer.Option(
+    False, "--all", help="List every stored job item — no limit."
+)
+
 
 @history_app.callback(invoke_without_command=True)
 def _history_default(
-    ctx: typer.Context, asc: bool = ASC_FLAG, as_json: bool = JSON_FLAG
+    ctx: typer.Context,
+    asc: bool = ASC_FLAG,
+    limit: int = LIMIT_FLAG,
+    list_all: bool = LIST_ALL_FLAG,
+    as_json: bool = JSON_FLAG,
 ) -> None:
     """Inspect and manage the local job-item store; bare `ade history`
     defaults to `ade history list`."""
     if ctx.invoked_subcommand is None:
-        list_items(ctx, asc=asc, as_json=as_json)
+        list_items(ctx, asc=asc, limit=limit, list_all=list_all, as_json=as_json)
 
 
 def require_job_id(token: str | None, *, as_json: bool) -> str:
@@ -81,13 +101,17 @@ def resolve_or_exit(jobs: store.JobStore, token: str, *, as_json: bool) -> str:
 def _grouped(records: list[dict]) -> list[tuple[dict, bool]]:
     """History order with linkage: every parse item (and every extract item
     without a living parent) is a top row; extract items referencing a
-    still-present parse render indented beneath it."""
+    still-present parse render indented beneath it. A child whose parent
+    fell outside the listing window (--limit) renders as its own top row —
+    the cap must never silently drop a record the --json array carries."""
+    ids = {record["job_item_id"] for record in records}
     children: dict[str, list[dict]] = {}
     tops: list[dict] = []
     for record in records:
         ref = record.get("parse") or {}
-        if ref.get("job_item_id") and not ref.get("missing"):
-            children.setdefault(ref["job_item_id"], []).append(record)
+        parent_id = ref.get("job_item_id")
+        if parent_id and not ref.get("missing") and parent_id in ids:
+            children.setdefault(parent_id, []).append(record)
         else:
             tops.append(record)
     rows: list[tuple[dict, bool]] = []
@@ -109,29 +133,61 @@ _STATE_STYLES = {
 
 @history_app.command("list")
 def list_items(
-    ctx: typer.Context, asc: bool = ASC_FLAG, as_json: bool = JSON_FLAG
+    ctx: typer.Context,
+    asc: bool = ASC_FLAG,
+    limit: int = LIMIT_FLAG,
+    list_all: bool = LIST_ALL_FLAG,
+    as_json: bool = JSON_FLAG,
 ) -> None:
     """List stored job items: id, kind, state, env, params, source —
-    newest submission first (--asc for oldest first). Extract items
-    referencing a parse item indent beneath it. Bare `ade history`
-    defaults to this command."""
+    the newest 100 submissions first (--limit/--all adjust, --asc for
+    oldest first). Extract items referencing a parse item indent
+    beneath it. Bare `ade history` defaults to this command."""
     jobs = store.JobStore(ade_home())
     ports: Ports = ctx.obj
     records = items.item_records(jobs)
+    # The sidebar read model always heals from the FULL scan — the
+    # listing cap is presentation only.
     historyjs.write(jobs, records, now=ports.clock.now())
     # Newest first by default — the run the user just did leads, matching
-    # the sidebar; --asc keeps the chronological read. Applied to both
-    # renderings AND the --json array, so the machine order never
-    # disagrees with what the terminal showed.
-    ordered = records if asc else items.newest_first(records)
-    rows = _grouped(ordered)
+    # the sidebar; --asc keeps the chronological read. The cap keeps the
+    # newest N whatever the order (a chronological tail under --asc).
+    # Both apply to the renderings AND the --json array, so the machine
+    # order never disagrees with what the terminal showed.
+    newest = items.newest_first(records)
+    kept = newest if list_all else newest[: limit]
+    if asc:
+        kept = sorted(
+            kept,
+            key=lambda r: (
+                r["submitted_at"] is None,
+                r["submitted_at"] or 0.0,
+                r["job_item_id"],
+            ),
+        )
+    hidden = len(records) - len(kept)
+    footer = (
+        f"showing the newest {len(kept)} of {len(records)} job items — "
+        "pass --all (or --limit N) for the rest"
+        if hidden > 0
+        else ""
+    )
+    rows = _grouped(kept)
     if not as_json and ports.stdout_is_tty() and records:
         # A real table is a TTY-only upgrade; piped output below stays
         # line-oriented (one row per item, children indented).
         _render_table(jobs, rows)
+        if footer:
+            typer.echo(footer)
         return
+    if as_json and footer:
+        # The --json array is silently shorter than the store; say so on
+        # stderr, where it can never pollute the machine payload.
+        typer.echo(footer, err=True)
     human = "\n".join(_plain_line(record, indent) for record, indent in rows)
-    emit(ordered, human or "No job items stored.", as_json=as_json)
+    if footer:
+        human += f"\n{footer}"
+    emit(kept, human or "No job items stored.", as_json=as_json)
 
 
 def _plain_line(record: dict, indent: bool) -> str:

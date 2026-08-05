@@ -750,7 +750,7 @@
     {
       "name": "history list",
       "usage": "ade history list [options] [--json]",
-      "summary": "List stored job items: id, kind, state, env, params, source \u2014\nnewest submission first (--asc for oldest first). Extract items\nreferencing a parse item indent beneath it. Bare `ade history`\ndefaults to this command.",
+      "summary": "List stored job items: id, kind, state, env, params, source \u2014\nthe newest 100 submissions first (--limit/--all adjust, --asc for\noldest first). Extract items referencing a parse item indent\nbeneath it. Bare `ade history` defaults to this command.",
       "arguments": [],
       "flags": [
         {
@@ -759,6 +759,20 @@
           "required": false,
           "default": null,
           "help": "Oldest submission first (the pre-1.0.3 order). The listing defaults to newest first \u2014 the run you just did leads, matching the viewer sidebar."
+        },
+        {
+          "flags": "--limit",
+          "metavar": "INTEGER",
+          "required": false,
+          "default": 100,
+          "help": "Keep only the newest N items (default 100), whatever the order; --all lifts the cap."
+        },
+        {
+          "flags": "--all",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "List every stored job item \u2014 no limit."
         }
       ],
       "supports_json": true,
@@ -802,7 +816,7 @@
             "what": "epoch seconds (null when unknown)"
           }
         ],
-        "note": "Ordered newest submission first (timestamp-less items last), matching the viewer sidebar; --asc restores oldest-first. The --json array follows the same order."
+        "note": "Ordered newest submission first (timestamp-less items last), matching the viewer sidebar; --asc restores oldest-first. Capped at the newest 100 items by default \u2014 --limit N adjusts, --all lifts the cap, and a capped run says so on stderr. The --json array follows the same order and cap."
       },
       "band": "local read models"
     },

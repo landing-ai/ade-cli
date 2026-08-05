@@ -233,16 +233,19 @@ loads the rest on demand from sidecar files rendered into the store.
 | command | what it does |
 |---|---|
 | `ade history` | defaults to `ade history list` |
-| `ade history list` | one row per job item: id, kind, state, params, source — newest first |
-| `ade history list --asc` | the same listing, oldest first |
+| `ade history list` | one row per job item: id, kind, state, params, source — newest 100, newest first |
+| `ade history list --asc` | the same newest items, oldest first |
+| `ade history list --all` | every stored job item, no cap (`--limit N` picks another cap) |
 | `ade history list --json` | full records (params verbatim, timestamps, linkage) |
 | `ade history clear JOB_ITEM_ID` | delete an item; clearing a parse cascades to its extracts |
 | `ade history clear --all` | delete every stored job item |
 
 The read model over the store — zero API calls; states derive from tickets
-and artifacts on disk. Listings are ordered newest submission first (the
-run you just did leads, matching the viewer sidebar); `--asc` restores
-the oldest-first chronological read, in `--json` too. Extract items
+and artifacts on disk. Listings show the newest 100 submissions, newest
+first (the run you just did leads, matching the viewer sidebar) — a
+capped listing says so in its last line; `--limit N` adjusts the cap,
+`--all` lifts it, and `--asc` presents the same items oldest-first, in
+`--json` too. Extract items
 referencing a parse render as indented
 child rows beneath it; an extraction whose parse was re-run in place with
 `--force` is marked **stale** (listing annotation, `"stale": true` in
