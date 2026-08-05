@@ -277,8 +277,9 @@ RESULTS: dict[str, dict] = {
         "note": "Ordered newest submission first (timestamp-less items "
         "last), matching the viewer sidebar; --asc restores oldest-first. "
         "Capped at the newest 100 items by default — --limit N adjusts, "
-        "--all lifts the cap, and a capped run says so on stderr. The "
-        "--json array follows the same order and cap.",
+        "--all lifts the cap, and a capped run says so up front (the "
+        "first line of the listing; on stderr for --json). The --json "
+        "array follows the same order and cap.",
     },
     "history clear": {
         "shape": "object",

@@ -166,9 +166,12 @@ def list_items(
             ),
         )
     hidden = len(records) - len(kept)
-    footer = (
+    # The cap notice LEADS the listing — a reader must know the view is
+    # capped before scanning it, not after — and names both ways out.
+    notice = (
         f"showing the newest {len(kept)} of {len(records)} job items — "
-        "pass --all (or --limit N) for the rest"
+        "run `ade history list --all` for the full list (or --limit N "
+        "for a different cap)"
         if hidden > 0
         else ""
     )
@@ -176,17 +179,17 @@ def list_items(
     if not as_json and ports.stdout_is_tty() and records:
         # A real table is a TTY-only upgrade; piped output below stays
         # line-oriented (one row per item, children indented).
+        if notice:
+            typer.echo(notice)
         _render_table(jobs, rows)
-        if footer:
-            typer.echo(footer)
         return
-    if as_json and footer:
+    if as_json and notice:
         # The --json array is silently shorter than the store; say so on
         # stderr, where it can never pollute the machine payload.
-        typer.echo(footer, err=True)
+        typer.echo(notice, err=True)
     human = "\n".join(_plain_line(record, indent) for record, indent in rows)
-    if footer:
-        human += f"\n{footer}"
+    if notice:
+        human = f"{notice}\n{human}"
     emit(kept, human or "No job items stored.", as_json=as_json)
 
 

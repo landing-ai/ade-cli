@@ -816,7 +816,7 @@
             "what": "epoch seconds (null when unknown)"
           }
         ],
-        "note": "Ordered newest submission first (timestamp-less items last), matching the viewer sidebar; --asc restores oldest-first. Capped at the newest 100 items by default \u2014 --limit N adjusts, --all lifts the cap, and a capped run says so on stderr. The --json array follows the same order and cap."
+        "note": "Ordered newest submission first (timestamp-less items last), matching the viewer sidebar; --asc restores oldest-first. Capped at the newest 100 items by default \u2014 --limit N adjusts, --all lifts the cap, and a capped run says so up front (the first line of the listing; on stderr for --json). The --json array follows the same order and cap."
       },
       "band": "local read models"
     },

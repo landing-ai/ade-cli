@@ -821,9 +821,12 @@ def test_history_list_caps_at_the_newest_100_by_default(cli):
     assert tail[0]["job_item_id"] == f"{20:016x}"
     assert tail[-1]["job_item_id"] == f"{119:016x}"
 
-    # The human rendering carries the footer inline.
+    # The human rendering LEADS with the notice — a reader knows the view
+    # is capped before scanning it — and it names the way out.
     human = cli.invoke("history", "list")
-    assert "newest 100 of 120" in human.stdout
+    first_line = human.stdout.splitlines()[0]
+    assert "newest 100 of 120" in first_line
+    assert "ade history list --all" in first_line
 
 
 def test_a_capped_listing_never_drops_a_child_whose_parent_fell_outside(cli):

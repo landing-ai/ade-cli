@@ -243,7 +243,7 @@ loads the rest on demand from sidecar files rendered into the store.
 The read model over the store — zero API calls; states derive from tickets
 and artifacts on disk. Listings show the newest 100 submissions, newest
 first (the run you just did leads, matching the viewer sidebar) — a
-capped listing says so in its last line; `--limit N` adjusts the cap,
+capped listing says so in its first line; `--limit N` adjusts the cap,
 `--all` lifts it, and `--asc` presents the same items oldest-first, in
 `--json` too. Extract items
 referencing a parse render as indented
