@@ -190,6 +190,9 @@
   /* Stale extraction mark: amber like .badge.stale, cursor invites the
      hover tooltip that explains it. */
   .hb-stale { color: #a15c07; cursor: help; }
+  /* Attached-copy caveat in the note banner: dotted underline invites
+     the hover tooltip that carries the full story. */
+  .copy-caveat { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
   .hb-empty { padding: 16px; font-size: 12px; color: var(--text-tertiary); text-align: center; }
   /* Collapse/expand — VUI GlobalSidebarV3: an IconSidebar ghost button in
      the header; collapsed is a 52px rail (width animates 300ms
@@ -942,6 +945,18 @@ function renderMarkdown(src, target) {
     const banner = document.getElementById("notebanner");
     banner.hidden = false;
     banner.textContent = DATA.note;
+  }
+  if (DATA.copy_caveat) {
+    // Attached-copy caveat (#169): a calm one-liner in the banner; the
+    // full story rides on hover, like the stale badge's tooltip.
+    const banner = document.getElementById("notebanner");
+    if (banner.textContent) banner.appendChild(document.createTextNode("  ·  "));
+    const caveat = document.createElement("span");
+    caveat.className = "copy-caveat";
+    caveat.textContent = DATA.copy_caveat.text;
+    caveat.title = DATA.copy_caveat.detail;
+    banner.hidden = false;
+    banner.appendChild(caveat);
   }
   // Workflow pills — Parse always; Extract only when the store holds
   // extractions (user decision; VUI gates pills on enabledTools,

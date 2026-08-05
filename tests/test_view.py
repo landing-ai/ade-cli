@@ -1145,8 +1145,18 @@ def test_view_download_attaches_the_url_document_and_renders(cli):
     assert payload["downloaded"] is True
     assert payload["built"] is True
     assert payload["pages_embedded"] == 2  # previews actually rendered
-    assert "downloaded copy" in payload["note"]  # the caveat
+    # The CLI note carries the short, actionable caveat...
+    assert "downloaded copy" in payload["note"]
+    assert "re-parse the downloaded file" in payload["note"]
     assert "parsed from a URL" not in payload["note"]  # gap closed
+    # ...and the artifact splits it: a calm banner line plus the full
+    # story on hover (like the stale badge).
+    caveat = embedded_data(cli, item_id)["copy_caveat"]
+    assert caveat["text"] == (
+        "page previews render from a downloaded copy of the URL"
+    )
+    assert "almost certainly identical" in caveat["detail"]
+    assert "ade parse -d" in caveat["detail"]
     copy = cli.home / "jobs" / item_id / "document.pdf"
     assert copy.read_bytes() == pdf
     meta = json.loads((cli.home / "jobs" / item_id / "meta.json").read_text())

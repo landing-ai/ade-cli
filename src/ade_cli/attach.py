@@ -80,16 +80,33 @@ def renderable_source(jobs: JobStore, item_id: str, meta: dict | None) -> str | 
     return source
 
 
+# The full story behind the caveat — the viewer shows it on hover (like
+# the stale badge); the CLI surfaces carry only the short, actionable
+# form below.
+CAVEAT_DETAIL = (
+    "This item was parsed from a URL: the server fetched and read the "
+    "original document, and the CLI never received those bytes. The copy "
+    "behind these page images was downloaded separately — almost "
+    "certainly identical, but there is nothing to verify it against. "
+    "Markdown, elements, and extractions come straight from the parse "
+    "and are unaffected either way. If boxes ever look misaligned with "
+    "a page image, the remote document likely changed since the parse — "
+    "re-parse the downloaded file locally (ade parse -d <file>) for a "
+    "fully verifiable item."
+)
+
+
 def caveat(jobs: JobStore, item_id: str, meta: dict | None) -> str | None:
-    """The honesty note renders from an attached copy must carry: the CLI
-    never saw the bytes the server parsed, so the copy cannot be verified
-    against that generation."""
+    """The short, actionable form of the attached-copy caveat, for the
+    surfaces with no hover (the CLI note line, crop warnings). Calm by
+    design: the copy is almost always right — the note says what to do
+    in the one case it isn't."""
     if not is_url_source(meta) or attached_file(jobs, item_id, meta) is None:
         return None
     return (
-        "page imagery renders from the item's downloaded copy of the URL "
-        "(the CLI never saw the bytes the server parsed, so the copy is "
-        "unverified against that run)"
+        "page imagery renders from the item's downloaded copy of the URL; "
+        "if boxes ever look misaligned, re-parse the downloaded file "
+        "locally (ade parse -d <file>)"
     )
 
 

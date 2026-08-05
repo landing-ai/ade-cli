@@ -55,7 +55,7 @@ ARTIFACT = "view.html"
 # Bump when the Python-side bundle shaping changes (the fields the template
 # receives): the template hash alone can't see it, and a stale artifact
 # would otherwise be reused forever (its item identity never moves).
-BUNDLE_REVISION = 4
+BUNDLE_REVISION = 5
 DEFAULT_DPI = 120
 # Embed posture: modest dpi, first PAGE_CAP pages inline (--pages picks a
 # different window); everything else lazy-loads from the sidecar chunks.
@@ -652,16 +652,16 @@ def _build(
         )
         note += action
         banner_note = note
-    # Renders from an attached copy carry the unverifiable-bytes caveat —
-    # the CLI never saw what the server parsed (#169).
+    # Renders from an attached copy carry the unverifiable-bytes caveat
+    # (#169) — short and actionable in the CLI note; in the artifact it
+    # renders as a compact banner line whose hover carries the full
+    # story, like the stale badge.
     copy_caveat = attach.caveat(
         store, bundle.get("parse_item_id") or item_id, meta
     )
-    if copy_caveat and (images or page_chunks):
+    show_caveat = bool(copy_caveat and (images or page_chunks))
+    if show_caveat:
         note = copy_caveat if note is None else f"{note}; {copy_caveat}"
-        banner_note = (
-            copy_caveat if banner_note is None else f"{banner_note}; {copy_caveat}"
-        )
     if page_chunks and note and "not embedded (cap" in note:
         deferred_pages = [p for p in all_pages if p not in images]
         note = (
@@ -711,6 +711,14 @@ def _build(
         "markdown": markdown_text,
         "raw_response": raw_response,
         "extractions": bundle["extractions"],
+        "copy_caveat": (
+            {
+                "text": "page previews render from a downloaded copy of the URL",
+                "detail": attach.CAVEAT_DETAIL,
+            }
+            if show_caveat
+            else None
+        ),
     }
     for page in payload["pages"]:
         page["image"] = page.pop("data_uri")
