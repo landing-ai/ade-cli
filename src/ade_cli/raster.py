@@ -146,12 +146,13 @@ def render_source(
             # raster — say why, what still works, and the action that
             # gets previews. The "source un" prefix is load-bearing:
             # view.py keys the no-sidecar path off it.
+            # Cause + what still works; the id-bearing action (`ade view
+            # <id> --download`) is appended by the view layer, which
+            # holds the item id.
             return {}, (
                 "source unavailable: parsed from a URL — the CLI never had "
                 "the document bytes to render page previews (markdown, "
-                "elements, and extractions are unaffected). For page "
-                "previews, download the document and parse the local "
-                "file: ade parse -d <file>"
+                "elements, and extractions are unaffected)."
             )
         return {}, (
             f"source unavailable: {source} no longer exists — restore the "
