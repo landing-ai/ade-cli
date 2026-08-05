@@ -1261,8 +1261,12 @@ def view(
         ]
         meta = bundle["parse_meta"]
         # Same drift rule as the standalone `crop` (issue #119): a changed
-        # source still renders, with the mismatch said out loud.
-        drift = source_drift_note(meta)
+        # source still renders, with the mismatch said out loud. URL items
+        # have no drift check; a crop from their attached copy carries the
+        # unverified-bytes caveat instead — mirroring standalone crop.
+        drift = source_drift_note(meta) or attach.caveat(
+            store, bundle.get("parse_item_id") or item_id, meta
+        )
         payload = {
             "job_item_id": item_id,
             "source_name": Path(meta["source"]).name if meta.get("source") else item_id,

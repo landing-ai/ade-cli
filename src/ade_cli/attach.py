@@ -20,6 +20,7 @@ verifiable against the parsed generation: renders from it carry the
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -123,44 +124,66 @@ def download(
     pre-signed URLs expire, so a late fetch failing is the expected
     failure mode, not a surprise."""
     url = meta.get("source") or ""
+    name = copy_name(url)
+    target = jobs.item_dir(item_id) / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f".{name}.tmp-{os.getpid()}")
+    digest = hashlib.sha256()
+    received = 0
+    # Streamed to disk, never buffered whole: the size cap must reject a
+    # wrong URL as soon as it is exceeded (or up front, when the server
+    # declares Content-Length), not after the entire body sat in memory.
     try:
         with httpx.Client(
             transport=transport, follow_redirects=True, timeout=60.0
         ) as client:
-            response = client.get(url)
+            with client.stream("GET", url) as response:
+                if response.status_code != 200:
+                    raise AttachError(
+                        "download_failed",
+                        f"{url} answered HTTP {response.status_code} — "
+                        "pre-signed URLs expire, so the link that fed this "
+                        "parse may no longer serve the document. Download "
+                        "it by other means and parse the local file "
+                        "(ade parse -d <file>), or re-parse with a fresh "
+                        "URL and --keep-copy.",
+                    )
+                declared = response.headers.get("content-length", "")
+                if declared.isdigit() and int(declared) > MAX_COPY_BYTES:
+                    raise AttachError(
+                        "download_failed",
+                        f"{url} declares {declared} bytes — past the "
+                        f"{MAX_COPY_BYTES}-byte attach cap; parse the local "
+                        "file instead (ade parse -d <file>).",
+                    )
+                with tmp.open("wb") as sink:
+                    for chunk in response.iter_bytes():
+                        received += len(chunk)
+                        if received > MAX_COPY_BYTES:
+                            raise AttachError(
+                                "download_failed",
+                                f"{url} exceeded the {MAX_COPY_BYTES}-byte "
+                                "attach cap mid-download; parse the local "
+                                "file instead (ade parse -d <file>).",
+                            )
+                        digest.update(chunk)
+                        sink.write(chunk)
     except httpx.HTTPError as error:
+        tmp.unlink(missing_ok=True)
         raise AttachError(
             "download_failed",
             f"could not fetch {url}: {type(error).__name__}: {error}. "
             "Download the document by other means and parse the local "
             "file (ade parse -d <file>).",
         ) from error
-    if response.status_code != 200:
-        raise AttachError(
-            "download_failed",
-            f"{url} answered HTTP {response.status_code} — pre-signed URLs "
-            "expire, so the link that fed this parse may no longer serve "
-            "the document. Download it by other means and parse the local "
-            "file (ade parse -d <file>), or re-parse with a fresh URL and "
-            "--keep-copy.",
-        )
-    content = response.content
-    if not content:
+    except AttachError:
+        tmp.unlink(missing_ok=True)
+        raise
+    if received == 0:
+        tmp.unlink(missing_ok=True)
         raise AttachError(
             "download_failed", f"{url} answered an empty body; nothing to attach."
         )
-    if len(content) > MAX_COPY_BYTES:
-        raise AttachError(
-            "download_failed",
-            f"{url} answered {len(content)} bytes — past the "
-            f"{MAX_COPY_BYTES}-byte attach cap; parse the local file instead "
-            "(ade parse -d <file>).",
-        )
-    name = copy_name(url)
-    target = jobs.item_dir(item_id) / name
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_name(f".{name}.tmp-{id(content)}")
-    tmp.write_bytes(content)
     replace_with_retry(tmp, target)
     # Record on the commit record under the item lock — a read-modify-write
     # against whatever generation currently owns meta.json.
@@ -169,9 +192,9 @@ def download(
         current.update(
             {
                 "attached_source": name,
-                "attached_sha256": hashlib.sha256(content).hexdigest(),
+                "attached_sha256": digest.hexdigest(),
                 "attached_at": now,
             }
         )
         jobs.write_json(item_id, "meta.json", current)
-    return name, len(content)
+    return name, received

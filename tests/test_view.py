@@ -1204,3 +1204,63 @@ def test_view_download_refuses_a_local_source_item(cli, parsed):
 
     assert payload["error"] == "not_a_url_source"
     assert cli.transport.requests == []  # nothing fetched
+
+
+def test_download_rejects_an_oversized_body_mid_stream(cli, monkeypatch):
+    """The attach cap fires while streaming (Copilot review on #173): a
+    wrong URL is rejected as soon as the cap is crossed, the temp file is
+    cleaned up, and nothing is attached."""
+    import httpx
+
+    from ade_cli import attach
+
+    monkeypatch.setattr(attach, "MAX_COPY_BYTES", 64)
+    item_id = seed_parse_item(cli, url="https://example.com/doc.pdf")
+    cli.transport.respond_with(lambda req: httpx.Response(200, content=b"x" * 200))
+
+    payload = view_json(cli, item_id, "--download", exit_code=1)
+
+    assert payload["error"] == "download_failed"
+    assert "attach cap" in payload["message"]
+    item_dir = cli.home / "jobs" / item_id
+    assert not (item_dir / "document.pdf").exists()
+    assert not list(item_dir.glob(".document.pdf.tmp-*"))  # temp cleaned up
+
+
+def test_download_rejects_a_declared_oversize_before_reading(cli, monkeypatch):
+    import httpx
+
+    from ade_cli import attach
+
+    monkeypatch.setattr(attach, "MAX_COPY_BYTES", 64)
+    item_id = seed_parse_item(cli, url="https://example.com/doc.pdf")
+    cli.transport.respond_with(
+        lambda req: httpx.Response(
+            200, content=b"x" * 200, headers={"content-length": "200"}
+        )
+    )
+
+    payload = view_json(cli, item_id, "--download", exit_code=1)
+
+    assert payload["error"] == "download_failed"
+    assert "declares" in payload["message"]  # rejected up front
+
+
+def test_view_crop_from_an_attached_copy_carries_the_caveat(cli):
+    """`view --crop` mirrors standalone crop (Copilot review on #173): a
+    crop rendered from the downloaded copy carries the unverified-bytes
+    caveat as its warning."""
+    import httpx
+
+    item_id = seed_parse_item(cli, url="https://example.com/doc.pdf")
+    cli.transport.respond_with(lambda req: httpx.Response(200, content=_pdf_bytes()))
+    view_json(cli, item_id, "--download")
+
+    result = cli.invoke(
+        "view", item_id, "--element-id", "text-0", "--crop", "--json"
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "cropped"
+    assert "downloaded copy" in payload["warning"]

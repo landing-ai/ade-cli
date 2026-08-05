@@ -46,6 +46,19 @@ if os.name == "nt":  # pragma: no cover - exercised on Windows only
         STILL_ACTIVE = 259
         ERROR_ACCESS_DENIED = 5
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        # Explicit signatures: ctypes defaults restype to c_int, which
+        # truncates a pointer-sized HANDLE on 64-bit Windows — the probe
+        # would then misreport liveness and leak the real handle.
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = [
+            wintypes.DWORD, wintypes.BOOL, wintypes.DWORD,
+        ]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.GetExitCodeProcess.argtypes = [
+            wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
         handle = kernel32.OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION, False, pid
         )

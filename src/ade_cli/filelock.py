@@ -66,6 +66,20 @@ if os.name == "nt":
         except OSError:
             return False
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        # Explicit signatures (same reason as historyjs._alive): a
+        # pointer-sized HANDLE must not pass through ctypes' c_int
+        # defaults on 64-bit Windows.
+        kernel32.GetFileType.restype = wintypes.DWORD
+        kernel32.GetFileType.argtypes = [wintypes.HANDLE]
+        kernel32.PeekNamedPipe.restype = wintypes.BOOL
+        kernel32.PeekNamedPipe.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+            ctypes.POINTER(wintypes.DWORD),
+            ctypes.POINTER(wintypes.DWORD),
+        ]
         file_type = kernel32.GetFileType(wintypes.HANDLE(handle))
         if file_type == FILE_TYPE_DISK:
             return True  # redirected from a file: reads never block
