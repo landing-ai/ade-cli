@@ -73,17 +73,28 @@ def history_js_items(cli):
     return payload["items"]
 
 
-def test_history_js_lists_latest_submission_first(cli, document):
-    """The sidebar renders history.js in file order; the newest run is what
-    the user just did, so it leads. `history list` keeps oldest-first."""
+def test_history_lists_newest_submission_first_by_default(cli, document):
+    """Listings lead with the run the user just did — the same order the
+    sidebar has always used; --asc restores the chronological read."""
     first = parse_file(cli, document)
     cli.clock.sleep(60)  # the second run submits later
     second = parse_file(cli, document, "--tier", "standard", job_id="job-0002")
 
     result = cli.invoke("history", "list", "--json")
-
-    assert [r["job_item_id"] for r in json.loads(result.stdout)] == [first, second]
+    assert [r["job_item_id"] for r in json.loads(result.stdout)] == [second, first]
     assert [item["id"] for item in history_js_items(cli)] == [second, first]
+
+    # --asc: oldest first, on both the subcommand and the bare default.
+    ascending = cli.invoke("history", "list", "--asc", "--json")
+    assert [r["job_item_id"] for r in json.loads(ascending.stdout)] == [first, second]
+    bare = cli.invoke("history", "--asc", "--json")
+    assert [r["job_item_id"] for r in json.loads(bare.stdout)] == [first, second]
+
+    # The human rendering follows the same order as --json.
+    human = cli.invoke("history", "list")
+    lines = [ln for ln in human.stdout.splitlines() if ln.strip()]
+    assert lines[0].startswith(second)
+    assert lines[1].startswith(first)
 
 
 def test_bare_history_defaults_to_list(cli, document):

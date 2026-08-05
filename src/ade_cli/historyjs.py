@@ -152,18 +152,11 @@ def write(store: JobStore, records: list[dict], *, now: float) -> Path:
     """Rewrite ``<store home>/history.js`` from already-scanned records.
 
     Items are emitted latest submission first — the sidebar renders the
-    file in order, and the newest run is the one the user just did.
-    ``history list`` keeps its own oldest-first order; timestamp-less
-    husks sort last either way.
+    file in order, and the newest run is the one the user just did
+    (``history list`` defaults to the same order; its ``--asc`` flag is
+    presentation-only and never reaches this file).
     """
-    ordered = sorted(
-        records,
-        key=lambda r: (
-            r["submitted_at"] is None,
-            -(r["submitted_at"] or 0.0),
-            r["job_item_id"],
-        ),
-    )
+    ordered = items.newest_first(records)
     payload = {
         "generated_at": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
         "items": [_sidebar_item(store, record) for record in ordered],

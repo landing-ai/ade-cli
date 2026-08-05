@@ -749,10 +749,18 @@
     },
     {
       "name": "history list",
-      "usage": "ade history list [--json]",
-      "summary": "List stored job items: id, kind, state, env, params, source. Extract\nitems referencing a parse item indent beneath it. Bare `ade history`\ndefaults to this command.",
+      "usage": "ade history list [options] [--json]",
+      "summary": "List stored job items: id, kind, state, env, params, source \u2014\nnewest submission first (--asc for oldest first). Extract items\nreferencing a parse item indent beneath it. Bare `ade history`\ndefaults to this command.",
       "arguments": [],
-      "flags": [],
+      "flags": [
+        {
+          "flags": "--asc",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "Oldest submission first (the pre-1.0.3 order). The listing defaults to newest first \u2014 the run you just did leads, matching the viewer sidebar."
+        }
+      ],
       "supports_json": true,
       "result": {
         "shape": "array",
@@ -793,7 +801,8 @@
             "key": "created_at / completed_at",
             "what": "epoch seconds (null when unknown)"
           }
-        ]
+        ],
+        "note": "Ordered newest submission first (timestamp-less items last), matching the viewer sidebar; --asc restores oldest-first. The --json array follows the same order."
       },
       "band": "local read models"
     },

@@ -274,6 +274,9 @@ RESULTS: dict[str, dict] = {
              "--force re-run after this extraction"),
             ("created_at / completed_at", "epoch seconds (null when unknown)"),
         ],
+        "note": "Ordered newest submission first (timestamp-less items "
+        "last), matching the viewer sidebar; --asc restores oldest-first. "
+        "The --json array follows the same order.",
     },
     "history clear": {
         "shape": "object",

@@ -26,12 +26,25 @@ from .ports import Ports
 history_app = typer.Typer(name="history", help="Inspect and manage the local job-item store.")
 
 
+# The listing's oldest-first escape hatch, shared by `history list` and
+# the bare-`history` default so both spell it identically.
+ASC_FLAG = typer.Option(
+    False,
+    "--asc",
+    help="Oldest submission first (the pre-1.0.3 order). The listing "
+    "defaults to newest first — the run you just did leads, matching "
+    "the viewer sidebar.",
+)
+
+
 @history_app.callback(invoke_without_command=True)
-def _history_default(ctx: typer.Context, as_json: bool = JSON_FLAG) -> None:
+def _history_default(
+    ctx: typer.Context, asc: bool = ASC_FLAG, as_json: bool = JSON_FLAG
+) -> None:
     """Inspect and manage the local job-item store; bare `ade history`
     defaults to `ade history list`."""
     if ctx.invoked_subcommand is None:
-        list_items(ctx, as_json=as_json)
+        list_items(ctx, asc=asc, as_json=as_json)
 
 
 def require_job_id(token: str | None, *, as_json: bool) -> str:
@@ -95,22 +108,30 @@ _STATE_STYLES = {
 
 
 @history_app.command("list")
-def list_items(ctx: typer.Context, as_json: bool = JSON_FLAG) -> None:
-    """List stored job items: id, kind, state, env, params, source. Extract
-    items referencing a parse item indent beneath it. Bare `ade history`
+def list_items(
+    ctx: typer.Context, asc: bool = ASC_FLAG, as_json: bool = JSON_FLAG
+) -> None:
+    """List stored job items: id, kind, state, env, params, source —
+    newest submission first (--asc for oldest first). Extract items
+    referencing a parse item indent beneath it. Bare `ade history`
     defaults to this command."""
     jobs = store.JobStore(ade_home())
     ports: Ports = ctx.obj
     records = items.item_records(jobs)
     historyjs.write(jobs, records, now=ports.clock.now())
-    rows = _grouped(records)
+    # Newest first by default — the run the user just did leads, matching
+    # the sidebar; --asc keeps the chronological read. Applied to both
+    # renderings AND the --json array, so the machine order never
+    # disagrees with what the terminal showed.
+    ordered = records if asc else items.newest_first(records)
+    rows = _grouped(ordered)
     if not as_json and ports.stdout_is_tty() and records:
         # A real table is a TTY-only upgrade; piped output below stays
         # line-oriented (one row per item, children indented).
         _render_table(jobs, rows)
         return
     human = "\n".join(_plain_line(record, indent) for record, indent in rows)
-    emit(records, human or "No job items stored.", as_json=as_json)
+    emit(ordered, human or "No job items stored.", as_json=as_json)
 
 
 def _plain_line(record: dict, indent: bool) -> str:
@@ -122,7 +143,8 @@ def _plain_line(record: dict, indent: bool) -> str:
         # environment field read as "?", never a guessed default.
         + f"{record['state']:<10}  {record.get('environment') or '?':<10}  "
         # When the run was submitted — the ordering key, so the listing's
-        # oldest-first order is legible. Local time, like the table.
+        # order (newest first; --asc for oldest) is legible. Local time,
+        # like the table.
         + f"{_submitted_cell(record):<16}  "
         + f"{items.compact_params(record)}  "
         + (record["source"] or "?")
