@@ -161,6 +161,11 @@ the summaries print each item's store path.
 - `extract.json` — raw extraction result with per-field spans
 - `evidence.json` — the field→box join (element ids, pages, boxes)
 
+One vocabulary note when reading these files: on-disk records
+(`meta.json`, `job.json`, `parse/ref.json`) spell the server-side run id
+as `job_id` — the wire contract's name for the same value `--json`
+payloads report as `run_id`. Neither is ever the job item id.
+
 Prefer `find` over loading `elements.json` into context: it returns
 joined records, not lines. `history clear JOB_ITEM_ID` deletes an item;
 clearing a parse item cascades to the extractions referencing it.

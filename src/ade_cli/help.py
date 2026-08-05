@@ -409,7 +409,10 @@ CONVENTIONS = [
         "job item ids",
         "Store commands take a job item id or an unambiguous prefix. "
         "Discover ids with `history list`; ambiguous or unknown ids error "
-        "with candidates listed.",
+        "with candidates listed. Distinct from the server-side run id: "
+        "--json payloads report that as run_id, and on-disk records spell "
+        "the same value job_id (the wire's name) — neither is ever a "
+        "job item id.",
     ),
     (
         "guarantees",
@@ -450,7 +453,8 @@ STORE_LAYOUT = [
     {
         "path": "  meta.json",
         "what": "commit record: kind, source, identity, params, state, "
-        "timestamps, artifact index",
+        "timestamps, artifact index. Its job_id field is the server-side "
+        "run id (= run_id in --json payloads), never the job item id",
     },
     {
         "path": "  job.json",
@@ -663,6 +667,7 @@ def _human(reference: dict, *, scoped: bool) -> str:
     lines.append("store layout")
     for entry in reference["store"]["layout"]:
         lines.append(f"  {entry['path']:<42}  {entry['what']}")
+    lines.append(f"  note: {reference['store']['note']}")
     lines.append("")
     lines.append("topics — conceptual pages, e.g. `ade help workflow`")
     for topic in reference["topics"]:
@@ -739,6 +744,12 @@ def help_command(
         "exit_states": EXIT_STATES,
         "store": {
             "home": "~/.ade (ADE_HOME overrides)",
+            # One vocabulary note for every on-disk record: job_id there
+            # is the wire's spelling of the run id.
+            "note": "On-disk records (meta.json, job.json, parse/ref.json) "
+            "spell the server-side run id as job_id — the wire contract's "
+            "name for the same value --json payloads report as run_id. "
+            "Neither is the job item id (the jobs/<id>/ folder name).",
             "layout": STORE_LAYOUT,
         },
     }

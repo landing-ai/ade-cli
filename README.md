@@ -134,6 +134,9 @@ source path × content × params` — one flat folder under
 `parse.json` (raw response), `parse.md` (markdown with its doc_id trailer),
 `elements.json` (flat elements projection, recomputable from `parse.json`),
 `meta.json` (provenance + params + identity), `job.json` (claim ticket).
+(Inside these files the server-side run id is spelled `job_id` — the
+wire's name for the same value `--json` payloads report as `run_id`;
+neither is the job item id.)
 `parse` is a guarantee: re-running the exact same invocation is served from
 disk with zero API calls (`--force` re-parses in place); changed params —
 or a moved/edited file — mint a *sibling* job item, so variants coexist and
