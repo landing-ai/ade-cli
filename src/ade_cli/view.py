@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -785,6 +786,23 @@ def _needs_chunks(store: JobStore, record: dict) -> bool:
     )
 
 
+def _detach_kwargs() -> dict:
+    """How a background child actually detaches, per platform. POSIX:
+    ``start_new_session`` (its own session, immune to the parent's
+    signals). Windows silently *ignores* ``start_new_session``, so the
+    "detached" child used to stay attached to the parent console — a
+    Ctrl-C or a closed terminal killed the builder mid-build. DETACHED
+    (no console at all — stdio is DEVNULL anyway) plus a new process
+    group makes the detachment real there."""
+    if os.name == "nt":  # pragma: no cover - exercised on Windows only
+        return {
+            "creationflags": (
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            )
+        }
+    return {"start_new_session": True}
+
+
 def _spawn_builder(store: JobStore, records: list[dict]) -> bool:
     """Detach the background builder when any sibling viewer — or any
     parse item's page-imagery chunks — is missing. The child re-execs
@@ -806,7 +824,7 @@ def _spawn_builder(store: JobStore, records: list[dict]) -> bool:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
-        start_new_session=True,
+        **_detach_kwargs(),
     )
     return True
 
@@ -821,7 +839,7 @@ def _spawn_server(port: int) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
-        start_new_session=True,
+        **_detach_kwargs(),
     )
 
 
@@ -830,8 +848,6 @@ def _sync_viewers(store: JobStore, now_fn) -> dict:
     with our pid — a dead claim is ignored by the scan and overwritten
     here), build, unclaim, rewriting history.js around every transition so
     open sidebars see building → built without a rebuild."""
-    import os
-
     template = _template()
     built, skipped, failed = [], [], []
     chunks = 0

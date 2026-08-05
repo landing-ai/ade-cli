@@ -145,6 +145,14 @@ def click_usage_payload(error: UsageError) -> dict:
         payload["error"] = "bad_parameter"
         if spelled:
             payload["param"] = spelled
+    # typer's vendored path validation formats the offending path with
+    # repr(), doubling every backslash on Windows (#172) — undo it for
+    # path-typed params so the message carries the path as typed. (UNC
+    # prefixes come back right too: repr's \\\\server\\share collapses to
+    # \\server\share.)
+    kind = getattr(getattr(param, "type", None), "name", "")
+    if kind in ("path", "file", "filename", "directory"):
+        payload["message"] = payload["message"].replace("\\\\", "\\")
     return payload
 
 

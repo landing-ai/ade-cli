@@ -596,3 +596,22 @@ def test_single_crop_output_path_creates_missing_parents(cli, parsed, tmp_path):
     assert out.is_file()
     assert payload["crops"][0]["path"] == str(out)
     assert payload["directory"] == str(out.parent)
+
+
+def test_crop_of_a_url_parsed_item_names_the_remediation(cli):
+    """#169's crop face: a URL parse has no local bytes to crop from — the
+    error must say why and how to get crops, not claim a file vanished."""
+    cli.transport.respond(202, {"job_id": "job-0001"})
+    cli.transport.respond(200, completed_job(rich_parse_response()))
+    parsed = cli.invoke(
+        "parse", "--document-url", "https://example.com/doc.pdf",
+        "--json", env=AUTH_ENV,
+    )
+    assert parsed.exit_code == 0, parsed.stdout
+    item_id = json.loads(parsed.stdout)["job_item_id"]
+
+    payload = crop_json(cli, item_id, "--element-id", "text-0", exit_code=1)
+
+    assert payload["error"] == "source_missing"
+    assert "parsed from a URL" in payload["message"]
+    assert "ade parse -d" in payload["message"]

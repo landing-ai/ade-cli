@@ -1091,3 +1091,24 @@ def test_crop_schema_tree_resolves_union_types_before_descending():
     html = (pathlib.Path(view.__file__).parent / "crop_template.html").read_text()
 
     assert 'const child = soleType(spec.type) === "array" ? spec.items : spec;' in html
+
+
+def test_url_parsed_item_note_explains_the_missing_preview_and_the_fix(cli):
+    """#169: a URL parse never hands the CLI the document bytes, so the
+    viewer cannot render page previews — the note must say why, what
+    still works, and the action that gets previews (not read as a broken
+    viewer)."""
+    item_id = seed_parse_item(cli, url="https://example.com/doc.pdf")
+
+    payload = view_json(cli, item_id)
+
+    assert payload["built"] is True
+    assert payload["pages_embedded"] == 0
+    assert "parsed from a URL" in payload["note"]
+    assert "ade parse -d" in payload["note"]  # the remediation
+    assert "unaffected" in payload["note"]  # what still works
+    # The artifact carries the same story: banner note + placeholders
+    # that point at it, and no lazy-load map that could spin forever.
+    data = embedded_data(cli, item_id)
+    assert "parsed from a URL" in data["note"]
+    assert data["page_chunks"] == []

@@ -383,3 +383,176 @@ def test_lock_acquisition_retries_when_a_clear_razes_the_directory(
         assert (jobs.item_dir("cafe0123abcd4567") / ".ticket.lock").exists()
     assert entered
     assert calls["n"] == 3  # two lost races, then a clean acquisition
+
+
+# --- #171: process liveness probing must not assume POSIX errno types ------
+
+
+def test_alive_treats_a_bare_oserror_as_dead(monkeypatch):
+    """Windows raises bare OSError (WinError 87) for a dead pid where
+    POSIX raises ProcessLookupError; the probe must read both as "not
+    alive", never crash the scan."""
+    from ade_cli import historyjs
+
+    def winerror_kill(pid, sig):
+        raise OSError(22, "The parameter is incorrect")
+
+    monkeypatch.setattr(historyjs.os, "kill", winerror_kill)
+    assert historyjs._alive(999_999_999) is False
+
+
+def test_alive_still_reads_permission_denied_as_a_live_claim(monkeypatch):
+    from ade_cli import historyjs
+
+    def denied_kill(pid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(historyjs.os, "kill", denied_kill)
+    assert historyjs._alive(1) is True
+
+
+def test_stale_builder_marker_never_crashes_view_or_history(
+    cli, document, monkeypatch
+):
+    """End-to-end shape of the QA crash: a .viewer.building marker naming
+    an exited pid, scanned by the history rewrite every view/history run
+    performs — with the platform raising the Windows-style bare OSError."""
+    from ade_cli import historyjs
+
+    item_id = parse_file(cli, document)
+    marker = cli.home / "jobs" / item_id / historyjs.BUILDING_MARKER
+    marker.write_text("999999999", encoding="utf-8")
+
+    def winerror_kill(pid, sig):
+        raise OSError(22, "The parameter is incorrect")
+
+    monkeypatch.setattr(historyjs.os, "kill", winerror_kill)
+
+    listed = cli.invoke("history", "list", "--json")
+    assert listed.exit_code == 0, listed.stdout
+
+    viewed = cli.invoke("view", item_id, "--no-open", "--no-sidebar-sync", "--json")
+    assert viewed.exit_code == 0, viewed.stdout
+    # The dead claim reads as not-building, so the next builder can reclaim.
+    status = historyjs.viewer_status(jobstore.JobStore(cli.home), item_id)
+    assert status != "building"
+
+
+# --- #168: piped-key detection works without select() ----------------------
+
+
+def test_poll_until_ready_reads_waiting_bytes_as_ready():
+    from ade_cli import filelock
+
+    assert filelock.poll_until_ready(lambda: 12, timeout=1.0) is True
+
+
+def test_poll_until_ready_reads_a_broken_pipe_as_ready():
+    """A writer that exited after closing its end: reading returns EOF
+    immediately, so the probe's None means ready, never a hang."""
+    from ade_cli import filelock
+
+    assert filelock.poll_until_ready(lambda: None, timeout=1.0) is True
+
+
+def test_poll_until_ready_times_out_on_a_silent_open_pipe():
+    from ade_cli import filelock
+
+    clock = {"now": 0.0}
+    sleeps: list[float] = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] += seconds
+
+    ready = filelock.poll_until_ready(
+        lambda: 0, timeout=0.25, monotonic=lambda: clock["now"], sleep=sleep
+    )
+
+    assert ready is False
+    assert sleeps  # sampled, not spun
+
+
+def test_piped_key_is_read_from_a_real_pipe(monkeypatch):
+    """The `echo $KEY | ade auth login` shape, against a real OS pipe with
+    a real fileno — the path the in-process runner's buffer never covers."""
+    from ade_cli import auth
+    from ade_cli.ports import Ports
+
+    read_end, write_end = os.pipe()
+    os.write(write_end, b"sk-piped-0123456789\n")
+    os.close(write_end)
+    stdin = os.fdopen(read_end, "r")
+    monkeypatch.setattr(auth.sys, "stdin", stdin)
+    try:
+        key = auth._piped_api_key(Ports(stdin_tty=False))
+    finally:
+        stdin.close()
+
+    assert key == "sk-piped-0123456789"
+
+
+def test_a_silent_open_pipe_yields_no_key_without_hanging(monkeypatch):
+    from ade_cli import auth
+    from ade_cli.ports import Ports
+
+    monkeypatch.setattr(auth, "_PIPED_KEY_TIMEOUT", 0.05)
+    read_end, write_end = os.pipe()  # writer stays open and silent
+    stdin = os.fdopen(read_end, "r")
+    monkeypatch.setattr(auth.sys, "stdin", stdin)
+    try:
+        key = auth._piped_api_key(Ports(stdin_tty=False))
+    finally:
+        stdin.close()
+        os.close(write_end)
+
+    assert key is None
+
+
+# --- #172: path errors carry the path as typed, not repr()-escaped ---------
+
+
+def test_windows_path_errors_carry_single_backslashes_in_json(cli):
+    """typer's path validation formats the offending path with repr(),
+    doubling every backslash; the --json payload must undo it so the
+    message carries the path as typed."""
+    result = cli.invoke("parse", "-d", "C:\\fake\\dir\\missing.pdf", "--json")
+
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "bad_parameter"
+    assert "C:\\fake\\dir\\missing.pdf" in payload["message"]
+    assert "\\\\" not in payload["message"]
+
+
+def test_id_only_path_errors_share_the_unescaped_message(cli):
+    result = cli.invoke("parse", "-d", "C:\\fake\\missing.pdf", "--id-only")
+
+    assert result.exit_code == 2
+    assert result.stdout.strip() == ""
+    assert "C:\\fake\\missing.pdf" in result.stderr
+    assert "\\\\" not in result.stderr
+
+
+def test_unc_style_prefixes_survive_the_unescape(cli):
+    """repr of a UNC path (\\\\server\\share) collapses back to exactly
+    the typed form — the replace must not eat the leading double slash."""
+    result = cli.invoke(
+        "parse", "-d", "\\\\server\\share\\missing.pdf", "--json"
+    )
+
+    assert result.exit_code == 2
+    assert "\\\\server\\share\\missing.pdf" in json.loads(result.stdout)["message"]
+
+
+def test_background_children_detach_with_platform_appropriate_kwargs():
+    """start_new_session is silently ignored on Windows — the detachment
+    must go through creationflags there (POSIX keeps the session split).
+    Asserted on the POSIX side here; the nt branch is a constant."""
+    from ade_cli import view
+
+    kwargs = view._detach_kwargs()
+    if os.name == "nt":  # pragma: no cover - exercised on Windows only
+        assert kwargs["creationflags"]
+    else:
+        assert kwargs == {"start_new_session": True}

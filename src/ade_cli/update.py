@@ -46,6 +46,7 @@ from typing import Mapping, NoReturn
 import httpx
 import typer
 
+from . import store
 from .config import load_config
 from .filelock import exclusive
 from .output import EXIT_FAILED, EXIT_USAGE, JSON_FLAG, emit, exit_with
@@ -601,7 +602,9 @@ def _write_cache(home: Path, *, latest: str | None) -> None:
             json.dumps({"checked_at": time.time(), "latest": latest}),
             encoding="utf-8",
         )
-        os.replace(tmp, home / CACHE_NAME)
+        # Retried like every shared-file publish (#162): concurrent
+        # invocations can race on the one stamp file on Windows.
+        store.replace_with_retry(tmp, home / CACHE_NAME)
     except OSError:
         pass
 

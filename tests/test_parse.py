@@ -656,3 +656,28 @@ def test_pending_payload_names_the_run_never_job(cli, document):
         "run_id": JOB_ID,
         "job_item_id": item_dir(cli, document).name,
     }
+
+
+def test_pending_human_text_names_the_job_item_id(cli, document):
+    """#167: the pending message is where a --wait 0 user learns the id
+    every follow-up command takes — it must name the job item, not only
+    the run."""
+    cli.transport.respond(202, {"job_id": JOB_ID})
+
+    result = cli.invoke("parse", "-d", str(document), "--wait", "0", env=AUTH_ENV)
+
+    assert result.exit_code == 3
+    assert JOB_ID in result.stdout
+    assert f"job item {item_dir(cli, document).name}" in result.stdout
+
+
+def test_failed_human_text_names_the_job_item_id(cli, document):
+    cli.transport.respond(202, {"job_id": JOB_ID})
+    cli.transport.respond(
+        200, job_payload("failed", failure_reason="scrambled bytes")
+    )
+
+    result = cli.invoke("parse", "-d", str(document), env=AUTH_ENV)
+
+    assert result.exit_code == 1
+    assert f"job item {item_dir(cli, document).name}" in result.stdout

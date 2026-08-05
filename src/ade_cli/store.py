@@ -195,7 +195,7 @@ def write_atomic(path: Path, text: str) -> Path:
         f".{path.name}.tmp-{os.getpid()}-{threading.get_ident()}"
     )
     tmp.write_text(text, encoding="utf-8")
-    _replace_with_retry(tmp, path)
+    replace_with_retry(tmp, path)
     return path
 
 
@@ -205,7 +205,7 @@ def write_atomic(path: Path, text: str) -> Path:
 _REPLACE_ATTEMPTS = 10
 
 
-def _replace_with_retry(tmp: Path, path: Path) -> None:
+def replace_with_retry(tmp: Path, path: Path) -> None:
     """``os.replace``, retried briefly with backoff on PermissionError
     (#162). On Windows, MoveFileEx fails with ERROR_ACCESS_DENIED while
     the destination is momentarily open in another process without
@@ -213,7 +213,9 @@ def _replace_with_retry(tmp: Path, path: Path) -> None:
     ``history.js``, so two concurrent invocations race on exactly this
     call. The condition is transient by nature; tens of milliseconds of
     backoff clears it. POSIX renames never fail this way, so the retry
-    path is Windows-only in practice."""
+    path is Windows-only in practice. Shared by every temp-then-replace
+    publisher of a store-shared file (history.js here, the telemetry
+    ledger, the update-check stamp)."""
     delay = 0.01
     for _ in range(_REPLACE_ATTEMPTS - 1):
         try:

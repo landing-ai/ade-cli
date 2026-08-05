@@ -45,7 +45,10 @@ def crop_box(source: str | None, page: int, box: dict, *, dpi: int):
     if not path.is_file():
         if source.startswith(("http://", "https://")):
             raise CropError(
-                "source_missing", "document was parsed from a URL; no local file"
+                "source_missing",
+                "parsed from a URL — the CLI never had the document bytes "
+                "to crop from; download the file and parse it locally "
+                "(ade parse -d <file>)",
             )
         raise CropError("source_missing", f"{source} no longer exists")
     try:
@@ -138,8 +141,22 @@ def render_source(
     path = Path(source)
     if not path.is_file():
         if source.startswith(("http://", "https://")):
-            return {}, "source unavailable: document was parsed from a URL"
-        return {}, f"source unavailable: {source} no longer exists"
+            # Not an error to fix in place (#169): URL parses never hand
+            # the CLI the document bytes, so there is nothing local to
+            # raster — say why, what still works, and the action that
+            # gets previews. The "source un" prefix is load-bearing:
+            # view.py keys the no-sidecar path off it.
+            return {}, (
+                "source unavailable: parsed from a URL — the CLI never had "
+                "the document bytes to render page previews (markdown, "
+                "elements, and extractions are unaffected). For page "
+                "previews, download the document and parse the local "
+                "file: ade parse -d <file>"
+            )
+        return {}, (
+            f"source unavailable: {source} no longer exists — restore the "
+            "file at that path and re-run `ade view` to render page previews"
+        )
     wanted = pages[:cap] if cap else list(pages)
     try:
         with path.open("rb") as head:

@@ -32,13 +32,12 @@ target plus every other environment holding a credential.
 from __future__ import annotations
 
 import os
-import select
 import sys
 
 import httpx
 import typer
 
-from . import credentials, gateway, oauth, term
+from . import credentials, filelock, gateway, oauth, term
 from .config import (
     ENVIRONMENTS,
     ResolvedConfig,
@@ -105,15 +104,13 @@ def _prompt_api_key(ports: Ports) -> str:
 # paid only on the path that would otherwise exit with an error anyway.
 _PIPED_KEY_TIMEOUT = 0.25
 
-
 def _piped_api_key(ports: Ports) -> str | None:
     """A key piped on stdin (``echo $KEY | ade auth login``), or None.
 
-    Never blocks on an idle pipe: stdin is read only once select says a
-    line is already there, so a harness that leaves stdin open but silent
-    gets the remediation immediately instead of a hang. Where select
-    cannot answer for the stream (Windows console handles) that is a No —
-    those callers still have ``--api-key`` and ``ADE_API_KEY``.
+    Never blocks on an idle pipe: stdin is read only once the platform
+    probe (select on POSIX, PeekNamedPipe on Windows — #168) says a line
+    is already there, so a harness that leaves stdin open but silent gets
+    the remediation immediately instead of a hang.
     """
     if ports.stdin_is_tty():
         return None
@@ -123,12 +120,10 @@ def _piped_api_key(ports: Ports) -> str | None:
         # Not a real OS stream (an in-process runner's buffer): readable
         # by construction, and reading it cannot block on a writer.
         fileno = None
-    if fileno is not None:
-        try:
-            if not select.select([fileno], [], [], _PIPED_KEY_TIMEOUT)[0]:
-                return None
-        except OSError:
-            return None
+    if fileno is not None and not filelock.stdin_ready(
+        fileno, timeout=_PIPED_KEY_TIMEOUT
+    ):
+        return None
     return sys.stdin.readline().strip() or None
 
 

@@ -1141,9 +1141,12 @@ function boxNode(id, type, box, cls, label) {
       placeholder.textContent = "page " + p.page + " — loading imagery…";
       deferred.set(p.page, placeholder);
     } else {
+      // No image and no sidecar to load one from: the banner (DATA.note)
+      // carries the why and the fix (#169 — URL parses have no local
+      // bytes to render); the per-page line just points at it.
       el("div", "placeholder", page).textContent =
         "page " + p.page + (p.status === "failed" ? " — failed to parse"
-          : " — source unavailable (boxes approximate)");
+          : " — no page image (see the notice above)");
     }
     for (const e of ELS) {
       if (e.page !== p.page) continue;

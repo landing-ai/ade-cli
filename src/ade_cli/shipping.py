@@ -43,7 +43,7 @@ from typing import Mapping
 
 import httpx
 
-from . import telemetry
+from . import store, telemetry
 from .config import DEFAULT_ENVIRONMENT, ENVIRONMENTS
 from .credentials import stored_credential
 from .filelock import exclusive
@@ -306,7 +306,10 @@ def _maintain(path: Path, home: Path, shipped: set[str]) -> None:
             os.write(fd, b"".join(lines))
         finally:
             os.close(fd)
-        os.replace(tmp, path)
+        # Same transient-sharing-violation retry as the store's atomic
+        # writes (#162): the ledger is one file shared by every
+        # concurrent invocation.
+        store.replace_with_retry(tmp, path)
 
 
 def _rotate(lines: list[bytes]) -> list[bytes]:
