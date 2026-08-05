@@ -182,6 +182,10 @@ RESULTS: dict[str, dict] = {
             ("artifacts", "artifact filenames written there"),
             ("markdown", "the parse markdown — only with --include markdown"),
             ("elements", "the flat projection — only with --include elements"),
+            ("kept_copy", "with --keep-copy: whether the URL document's "
+             "copy was stored in the job item"),
+            ("keep_copy_error", "with --keep-copy: why the copy could not "
+             "be stored (the parse itself still succeeded)"),
         ],
     },
     "extract": {
@@ -248,6 +252,8 @@ RESULTS: dict[str, dict] = {
             ("built", "true when this run rebuilt the artifact"),
             ("pages_embedded", "pages inlined; the rest load from sidecars"),
             ("note", "why the render weakened, when it did (else null)"),
+            ("downloaded", "with --download: true when this run fetched "
+             "the URL document into the job item (false: already attached)"),
             ("deep_link", "view.html#element=... when --element-id was given"),
             ("history_items", "items in the rebuilt sidebar read model"),
             ("sidebar_sync", "true when sibling viewers build in the background"),
@@ -470,6 +476,12 @@ STORE_LAYOUT = [
         "path": "  markdown.md",
         "what": "bring-your-own-markdown extract items: the input markdown, "
         "copied in (spans index exactly these bytes)",
+    },
+    {
+        "path": "  document.<ext>",
+        "what": "URL parses: the attached document copy (`parse "
+        "--keep-copy` / `view --download`) page previews and crops render "
+        "from — unverified against the parsed run",
     },
     {
         "path": "  view.html / crops/",

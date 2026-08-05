@@ -681,3 +681,87 @@ def test_failed_human_text_names_the_job_item_id(cli, document):
 
     assert result.exit_code == 1
     assert f"job item {item_dir(cli, document).name}" in result.stdout
+
+
+def test_keep_copy_downloads_the_url_document_into_the_job_item(cli):
+    """#169: --keep-copy fetches the document at parse time — while the
+    (often pre-signed) URL still works — so previews and crops render
+    locally ever after. Plain HTTP; the parse's own billing is untouched."""
+    import httpx
+
+    cli.transport.respond(202, {"job_id": JOB_ID})
+    cli.transport.respond(200, completed_job())
+    pdf = b"%PDF-1.4 tiny fixture"
+    cli.transport.respond_with(lambda req: httpx.Response(200, content=pdf))
+
+    result = cli.invoke(
+        "parse", "--document-url", "https://example.com/inv.pdf",
+        "--keep-copy", "--json", env=AUTH_ENV,
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["kept_copy"] is True
+    item_dir_ = cli.home / "jobs" / payload["job_item_id"]
+    assert (item_dir_ / "document.pdf").read_bytes() == pdf
+    meta = json.loads((item_dir_ / "meta.json").read_text())
+    assert meta["attached_source"] == "document.pdf"
+    assert meta["source"] == "https://example.com/inv.pdf"
+    assert str(cli.transport.requests[-1].url) == "https://example.com/inv.pdf"
+
+
+def test_keep_copy_failure_warns_but_the_parse_succeeds(cli):
+    import httpx
+
+    cli.transport.respond(202, {"job_id": JOB_ID})
+    cli.transport.respond(200, completed_job())
+    cli.transport.respond_with(lambda req: httpx.Response(403, content=b"expired"))
+
+    result = cli.invoke(
+        "parse", "--document-url", "https://example.com/inv.pdf",
+        "--keep-copy", "--json", env=AUTH_ENV,
+    )
+
+    assert result.exit_code == 0, result.stdout  # the billable work succeeded
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "parsed"
+    assert payload["kept_copy"] is False
+    assert "expire" in payload["keep_copy_error"]
+
+
+def test_keep_copy_requires_a_url_source(cli, document):
+    result = cli.invoke(
+        "parse", "-d", str(document), "--keep-copy", "--json", env=AUTH_ENV
+    )
+
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error"] == "keep_copy_local_source"
+    assert cli.transport.requests == []
+
+
+def test_keep_copy_on_a_cached_hit_attaches_late(cli):
+    """A URL item parsed without --keep-copy can pick the copy up on a
+    later (free, cached) re-run — no re-parse needed."""
+    import httpx
+
+    cli.transport.respond(202, {"job_id": JOB_ID})
+    cli.transport.respond(200, completed_job())
+    first = cli.invoke(
+        "parse", "--document-url", "https://example.com/inv.pdf",
+        "--json", env=AUTH_ENV,
+    )
+    assert first.exit_code == 0
+
+    pdf = b"%PDF-1.4 tiny fixture"
+    cli.transport.respond_with(lambda req: httpx.Response(200, content=pdf))
+    result = cli.invoke(
+        "parse", "--document-url", "https://example.com/inv.pdf",
+        "--keep-copy", "--json", env=AUTH_ENV,
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["cached"] is True  # no re-parse, no new bill
+    assert payload["kept_copy"] is True
+    item_dir_ = cli.home / "jobs" / payload["job_item_id"]
+    assert (item_dir_ / "document.pdf").read_bytes() == pdf

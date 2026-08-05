@@ -28,7 +28,7 @@ from pathlib import Path
 
 import typer
 
-from . import elements, items, store
+from . import attach, elements, items, store
 from .config import ade_home
 from .history import require_job_id, resolve_or_exit
 from .output import EXIT_FAILED, EXIT_USAGE, JSON_FLAG, emit, exit_with, tilde
@@ -52,8 +52,14 @@ def crop_element_to_file(
     failure. ``source_item_id`` names the parse item whose recorded source
     renders the imagery when it isn't ``item_id`` itself (a referencing
     extract item); the PNG still lands under ``item_id``'s ``crops/``."""
-    meta = jobs.read_json(source_item_id or item_id, "meta.json") or {}
-    image = crop_box(meta.get("source"), record["page"], record["box"], dpi=dpi)
+    owner = source_item_id or item_id
+    meta = jobs.read_json(owner, "meta.json") or {}
+    # URL parses render from their attached copy when one exists (#169);
+    # local parses keep the recorded source and its honest errors.
+    image = crop_box(
+        attach.renderable_source(jobs, owner, meta),
+        record["page"], record["box"], dpi=dpi,
+    )
     if output is None:
         output = jobs.item_dir(item_id) / "crops" / f"{record['id']}@{dpi}dpi.png"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -230,7 +236,12 @@ def crop(
     )
     # One drift check per invocation, not per element: the batch renders
     # from a single recorded source, and hashing it once is the whole cost.
-    drift = source_drift_note(jobs.read_json(parse_item_id, "meta.json"))
+    # URL items have no drift check (no recorded content hash); a render
+    # from their attached copy carries the unverified-bytes caveat instead.
+    parse_meta = jobs.read_json(parse_item_id, "meta.json")
+    drift = source_drift_note(parse_meta) or attach.caveat(
+        jobs, parse_item_id, parse_meta
+    )
     directory, single_file = _crop_target(
         jobs, item_id, output, dpi=dpi, batch=batch, as_json=as_json
     )
@@ -254,13 +265,25 @@ def crop(
             # Source-level failures (missing file, missing page) are the
             # whole batch's failure, not one element's: stopping is the
             # never-a-stale-image rule, and a partial batch that quietly
-            # skipped pages would read as a complete one.
+            # skipped pages would read as a complete one. URL items get
+            # the id-bearing fetch action instead of "restore the source"
+            # (#169 — there was never a local file to restore).
+            message = error.message
+            if "parsed from a URL" in message:
+                message += (
+                    f" Fetch it with `ade view {parse_item_id} --download`, "
+                    "then re-run this crop."
+                )
+                tail = ""
+            else:
+                tail = (
+                    " (a crop is never served from stale imagery; restore "
+                    "the source and re-run)"
+                )
             exit_with(
                 {"error": error.kind, "job_item_id": item_id,
-                 "element_id": record["id"], "message": error.message},
-                f"Cannot crop {record['id']}: {error.message} (a crop is "
-                "never served from stale imagery; restore the source and "
-                "re-run).",
+                 "element_id": record["id"], "message": message},
+                f"Cannot crop {record['id']}: {message}{tail}.",
                 as_json=as_json,
                 code=EXIT_FAILED,
             )

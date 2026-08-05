@@ -468,6 +468,13 @@
           "help": "Re-parse even if already parsed, or abandon an unreadable job for a fresh one (bills a new parse)."
         },
         {
+          "flags": "--keep-copy",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "--document-url only: also download the document into the job item (plain HTTP, no API credits) so page previews and crops render locally \u2014 fetched now, while the URL (often pre-signed) still works. Without it, URL parses have no local bytes and the viewer explains how to fetch them later (`ade view <id> --download`)."
+        },
+        {
           "flags": "--include",
           "metavar": "markdown|elements",
           "required": false,
@@ -545,6 +552,14 @@
           {
             "key": "elements",
             "what": "the flat projection \u2014 only with --include elements"
+          },
+          {
+            "key": "kept_copy",
+            "what": "with --keep-copy: whether the URL document's copy was stored in the job item"
+          },
+          {
+            "key": "keep_copy_error",
+            "what": "with --keep-copy: why the copy could not be stored (the parse itself still succeeded)"
           }
         ]
       },
@@ -961,6 +976,13 @@
           "help": "Pages to embed images for, 1-indexed, e.g. '1,3-5'."
         },
         {
+          "flags": "--download",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "URL-parsed items: fetch the document from its recorded URL into the job item and render page previews from that copy \u2014 the parse itself never gives the CLI the bytes (#169). Plain HTTP, no API credits; the copy is unverified against the parsed run. Also works on an extract item id (fetches into its referenced parse item)."
+        },
+        {
           "flags": "--no-sidebar-sync",
           "metavar": null,
           "required": false,
@@ -1013,6 +1035,10 @@
           {
             "key": "note",
             "what": "why the render weakened, when it did (else null)"
+          },
+          {
+            "key": "downloaded",
+            "what": "with --download: true when this run fetched the URL document into the job item (false: already attached)"
           },
           {
             "key": "deep_link",
@@ -1278,6 +1304,10 @@
       {
         "path": "  markdown.md",
         "what": "bring-your-own-markdown extract items: the input markdown, copied in (spans index exactly these bytes)"
+      },
+      {
+        "path": "  document.<ext>",
+        "what": "URL parses: the attached document copy (`parse --keep-copy` / `view --download`) page previews and crops render from \u2014 unverified against the parsed run"
       },
       {
         "path": "  view.html / crops/",

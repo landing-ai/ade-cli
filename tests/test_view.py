@@ -1105,10 +1105,92 @@ def test_url_parsed_item_note_explains_the_missing_preview_and_the_fix(cli):
     assert payload["built"] is True
     assert payload["pages_embedded"] == 0
     assert "parsed from a URL" in payload["note"]
-    assert "ade parse -d" in payload["note"]  # the remediation
+    assert "--download" in payload["note"]  # the id-bearing action
+    assert item_id[:8] in payload["note"]
+    assert "--keep-copy" in payload["note"]  # the parse-time alternative
     assert "unaffected" in payload["note"]  # what still works
     # The artifact carries the same story: banner note + placeholders
     # that point at it, and no lazy-load map that could spin forever.
     data = embedded_data(cli, item_id)
     assert "parsed from a URL" in data["note"]
     assert data["page_chunks"] == []
+
+
+def _pdf_bytes(pages=2):
+    import io
+
+    import pypdfium2 as pdfium
+
+    doc = pdfium.PdfDocument.new()
+    for _ in range(pages):
+        doc.new_page(612, 792)
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    return buffer.getvalue()
+
+
+def test_view_download_attaches_the_url_document_and_renders(cli):
+    """#169: `view --download` fetches the URL document into the job item
+    and the SAME run renders page previews from the copy — with the
+    unverified-bytes caveat, since the CLI never saw what the server
+    parsed."""
+    import httpx
+
+    item_id = seed_parse_item(cli, url="https://example.com/doc.pdf")
+    pdf = _pdf_bytes()
+    cli.transport.respond_with(lambda req: httpx.Response(200, content=pdf))
+
+    payload = view_json(cli, item_id, "--download")
+
+    assert payload["downloaded"] is True
+    assert payload["built"] is True
+    assert payload["pages_embedded"] == 2  # previews actually rendered
+    assert "downloaded copy" in payload["note"]  # the caveat
+    assert "parsed from a URL" not in payload["note"]  # gap closed
+    copy = cli.home / "jobs" / item_id / "document.pdf"
+    assert copy.read_bytes() == pdf
+    meta = json.loads((cli.home / "jobs" / item_id / "meta.json").read_text())
+    assert meta["attached_source"] == "document.pdf"
+    assert meta["source"] == "https://example.com/doc.pdf"  # provenance kept
+    fetched = cli.transport.requests[-1]
+    assert str(fetched.url) == "https://example.com/doc.pdf"
+
+
+def test_view_download_is_idempotent(cli):
+    import httpx
+
+    item_id = seed_parse_item(cli, url="https://example.com/doc.pdf")
+    cli.transport.respond_with(lambda req: httpx.Response(200, content=_pdf_bytes()))
+    view_json(cli, item_id, "--download")
+    seen = len(cli.transport.requests)
+
+    payload = view_json(cli, item_id, "--download")
+
+    assert payload["downloaded"] is False  # already attached, no re-fetch
+    assert len(cli.transport.requests) == seen
+    assert payload["built"] is False  # the attach didn't move the fingerprint
+    # The caveat lives in the already-built artifact's banner.
+    assert "downloaded copy" in artifact(cli, item_id)
+
+
+def test_view_download_reports_an_expired_url(cli):
+    import httpx
+
+    item_id = seed_parse_item(cli, url="https://example.com/doc.pdf")
+    cli.transport.respond_with(lambda req: httpx.Response(403, content=b"denied"))
+
+    payload = view_json(cli, item_id, "--download", exit_code=1)
+
+    assert payload["error"] == "download_failed"
+    assert "expire" in payload["message"]  # pre-signed links: the expected cause
+    assert "ade parse -d" in payload["message"]  # the fallback action
+    assert not (cli.home / "jobs" / item_id / "document.pdf").exists()
+
+
+def test_view_download_refuses_a_local_source_item(cli, parsed):
+    item_id, _ = parsed
+
+    payload = view_json(cli, item_id, "--download", exit_code=2)
+
+    assert payload["error"] == "not_a_url_source"
+    assert cli.transport.requests == []  # nothing fetched
