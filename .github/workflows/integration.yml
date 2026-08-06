@@ -26,13 +26,17 @@ on:
 
 jobs:
   integration:
+    # One matrix, two independent check rows ("Integration / macOS",
+    # "Integration / Windows"): fail-fast off so one platform's failure
+    # never cancels or masks the other's result.
+    name: ${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: macos
+          - platform: macOS
             runner: macos-latest
-          - platform: windows
+          - platform: Windows
             runner: windows-latest
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
