@@ -161,6 +161,7 @@ def find_element_or_exit(
 
 
 def crop(
+    ctx: typer.Context,
     job_id_token: str | None = typer.Argument(
         None, metavar="[JOB_ITEM_ID]", help="Job item id or unambiguous prefix."
     ),
@@ -193,6 +194,16 @@ def crop(
     dpi: int = typer.Option(DEFAULT_CROP_DPI, "--dpi", min=1, help="Render dpi."),
     open_image: bool = typer.Option(
         False, "--open", help="Open the crop (or the directory holding them)."
+    ),
+    download: bool | None = typer.Option(
+        None, "--download/--no-download",
+        help="URL-parsed items: fetch the document from its recorded URL "
+        "into the job item and crop from that copy — the parse itself "
+        "never gives the CLI the bytes (#169). This happens "
+        "automatically when no copy is attached yet (a notice and "
+        "progress line land on stderr); --no-download skips the fetch, "
+        "and the crop then fails honestly (a crop has no empty-imagery "
+        "fallback).",
     ),
     as_json: bool = JSON_FLAG,
 ) -> None:
@@ -234,11 +245,61 @@ def crop(
     selected = elements.select(
         records, element_type=element_type, page=page, element_ids=element_ids
     )
+    parse_meta = jobs.read_json(parse_item_id, "meta.json")
+    if download and not attach.is_url_source(parse_meta):
+        message = (
+            f"Job item {item_id} has no URL source to download: "
+            "--download applies to items parsed from --document-url "
+            "(local parses crop from their file directly)."
+        )
+        exit_with(
+            {
+                "error": "not_a_url_source",
+                "job_item_id": item_id,
+                "message": message,
+            },
+            message,
+            as_json=as_json,
+            code=EXIT_USAGE,
+        )
+    # A URL parse without an attached copy has nothing local to crop
+    # from, so the copy fetches now by default — announced on stderr,
+    # suppressible with --no-download (#169 follow-up, mirroring `view`).
+    # Unlike view there is no degraded render to fall back to (a crop is
+    # never served from missing imagery), so a failed fetch is the
+    # command's failure, exactly as the no-copy state already was.
+    downloaded = None
+    if (
+        download is not False
+        and selected
+        and attach.is_url_source(parse_meta)
+        and attach.attached_file(jobs, parse_item_id, parse_meta) is None
+    ):
+        try:
+            attach.download_with_notice(
+                jobs,
+                parse_item_id,
+                parse_meta or {},
+                ports=ctx.obj,
+                as_json=as_json,
+            )
+        except attach.AttachError as error:
+            exit_with(
+                {
+                    "error": error.kind,
+                    "job_item_id": parse_item_id,
+                    "message": error.message,
+                },
+                error.message,
+                as_json=as_json,
+                code=EXIT_FAILED,
+            )
+        downloaded = True
+        parse_meta = jobs.read_json(parse_item_id, "meta.json")
     # One drift check per invocation, not per element: the batch renders
     # from a single recorded source, and hashing it once is the whole cost.
     # URL items have no drift check (no recorded content hash); a render
     # from their attached copy carries the unverified-bytes caveat instead.
-    parse_meta = jobs.read_json(parse_item_id, "meta.json")
     drift = source_drift_note(parse_meta) or attach.caveat(
         jobs, parse_item_id, parse_meta
     )
@@ -271,8 +332,9 @@ def crop(
             message = error.message
             if "parsed from a URL" in message:
                 message += (
-                    f" Fetch it with `ade view {parse_item_id} --download`, "
-                    "then re-run this crop."
+                    " Re-run without --no-download to fetch the document, "
+                    f"or fetch it with `ade view {parse_item_id} "
+                    "--download` first."
                 )
                 tail = ""
             else:
@@ -312,6 +374,7 @@ def crop(
         "count": len(crops),
         "directory": str(landed),
         "crops": crops,
+        **({"downloaded": downloaded} if downloaded is not None else {}),
         **({"warning": drift} if drift else {}),
     }
     if not batch:

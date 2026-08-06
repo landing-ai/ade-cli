@@ -608,7 +608,7 @@ def test_view_never_reuses_an_unrenderable_build(cli, tmp_path):
 def test_view_degrades_for_url_documents(cli):
     item_id = seed_parse_item(cli, url="https://example.com/invoice.pdf")
 
-    payload = view_json(cli, item_id)
+    payload = view_json(cli, item_id, "--no-download")
 
     assert payload["built"] is True
     assert "URL" in payload["note"]
@@ -784,7 +784,7 @@ def test_history_js_neutralizes_script_closing_sequences(cli):
     # history.js injection posture).
     item_id = seed_parse_item(cli, url="https://x.test/</script><img src=x>")
 
-    view_json(cli, item_id)
+    view_json(cli, item_id, "--no-download")
 
     raw = (cli.home / "history.js").read_text(encoding="utf-8")
     assert "</script" not in raw
@@ -1094,21 +1094,22 @@ def test_crop_schema_tree_resolves_union_types_before_descending():
 
 
 def test_url_parsed_item_note_explains_the_missing_preview_and_the_fix(cli):
-    """#169: a URL parse never hands the CLI the document bytes, so the
-    viewer cannot render page previews — the note must say why, what
-    still works, and the action that gets previews (not read as a broken
-    viewer)."""
+    """#169: a URL parse never hands the CLI the document bytes, so a
+    viewer built without the copy (here: fetch suppressed) cannot render
+    page previews — the note must say why, what still works, and the
+    action that gets previews (not read as a broken viewer)."""
     item_id = seed_parse_item(cli, url="https://example.com/doc.pdf")
 
-    payload = view_json(cli, item_id)
+    payload = view_json(cli, item_id, "--no-download")
 
     assert payload["built"] is True
     assert payload["pages_embedded"] == 0
     assert "parsed from a URL" in payload["note"]
-    assert "--download" in payload["note"]  # the id-bearing action
+    assert "--download" in payload["note"]  # the id-bearing retry action
     assert item_id[:8] in payload["note"]
     assert "--keep-copy" in payload["note"]  # the parse-time alternative
     assert "unaffected" in payload["note"]  # what still works
+    assert cli.transport.requests == []  # --no-download means no fetch
     # The artifact carries the same story: banner note + placeholders
     # that point at it, and no lazy-load map that could spin forever.
     data = embedded_data(cli, item_id)
@@ -1181,6 +1182,74 @@ def test_view_download_is_idempotent(cli):
     assert payload["built"] is False  # the attach didn't move the fingerprint
     # The caveat lives in the already-built artifact's banner.
     assert "downloaded copy" in artifact(cli, item_id)
+
+
+def test_view_auto_downloads_a_url_item_without_a_copy(cli):
+    """A plain `ade view` on a URL-sourced item fetches the copy by
+    default — nobody should have to know a flag to see page previews;
+    the receipt records the fetch exactly like explicit --download."""
+    import httpx
+
+    item_id = seed_parse_item(cli, url="https://example.com/doc.pdf")
+    pdf = _pdf_bytes()
+    cli.transport.respond_with(lambda req: httpx.Response(200, content=pdf))
+
+    payload = view_json(cli, item_id)
+
+    assert payload["downloaded"] is True
+    assert payload["pages_embedded"] == 2
+    assert "downloaded copy" in payload["note"]
+    assert (cli.home / "jobs" / item_id / "document.pdf").read_bytes() == pdf
+
+    # Once attached, later views have nothing to fetch and no receipt.
+    seen = len(cli.transport.requests)
+    again = view_json(cli, item_id)
+    assert len(cli.transport.requests) == seen
+    assert "downloaded" not in again
+
+
+def test_view_auto_download_announces_itself_on_stderr(cli):
+    """The fetch is never silent (the whole point of the notice): a
+    human run says why the network is being touched and how to skip it,
+    and shows the download's progress; --json stays byte-stable and
+    quiet."""
+    import httpx
+
+    item_id = seed_parse_item(cli, url="https://example.com/doc.pdf")
+    pdf = _pdf_bytes()
+    cli.transport.respond_with(
+        lambda req: httpx.Response(
+            200, content=pdf, headers={"content-length": str(len(pdf))}
+        )
+    )
+
+    result = cli.invoke("view", item_id, "--no-sidebar-sync", "--no-open")
+
+    assert result.exit_code == 0, result.stdout
+    assert "parsed from a URL" in result.stderr
+    assert "--no-download" in result.stderr  # the opt-out, said up front
+    assert "downloading document.pdf" in result.stderr  # the progress line
+    assert "downloading" not in result.stdout  # payload stream untouched
+
+
+def test_view_auto_download_failure_degrades_to_the_empty_preview(cli):
+    """Auto mode never turns yesterday's working `ade view` into a
+    failure: an expired URL records the error and the viewer still
+    builds with the honest empty-preview note — only explicit
+    --download makes the fetch load-bearing."""
+    import httpx
+
+    item_id = seed_parse_item(cli, url="https://example.com/doc.pdf")
+    cli.transport.respond_with(lambda req: httpx.Response(403, content=b"denied"))
+
+    payload = view_json(cli, item_id)
+
+    assert payload["downloaded"] is False
+    assert "expire" in payload["download_error"]
+    assert payload["built"] is True
+    assert payload["pages_embedded"] == 0
+    assert "parsed from a URL" in payload["note"]
+    assert "--download" in payload["note"]  # the retry action
 
 
 def test_view_download_reports_an_expired_url(cli):

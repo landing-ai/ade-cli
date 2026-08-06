@@ -2,19 +2,22 @@
 
 ``parse --document-url`` never hands the CLI the document bytes — the
 server fetches the URL — so page previews and crops have nothing local
-to render from. An *attached copy* closes that gap on explicit consent:
-``parse --keep-copy`` downloads the document at parse time (while the
-URL — often pre-signed — still works), and ``view --download`` fetches
-it after the fact. The copy lives inside the job item
-(``jobs/<id>/document.<ext>``) and is recorded on meta.json as auxiliary
-metadata: the recorded ``source`` stays the URL (provenance truth) and
-the item id never moves. The raster layer falls back to the copy via
-``renderable_source``.
+to render from. An *attached copy* closes that gap: ``parse
+--keep-copy`` downloads the document at parse time (while the URL —
+often pre-signed — still works), and ``view`` / ``crop`` fetch it on
+first use — automatically when the item is URL-sourced and no copy is
+attached yet, announced by a stderr notice + progress line
+(``download_with_notice``), suppressible with ``--no-download``. The
+copy lives inside the job item (``jobs/<id>/document.<ext>``) and is
+recorded on meta.json as auxiliary metadata: the recorded ``source``
+stays the URL (provenance truth) and the item id never moves. The
+raster layer falls back to the copy via ``renderable_source``.
 
-The CLI still never fetches a URL without one of these explicit flags —
-and because it never saw the original bytes, an attached copy is not
-verifiable against the parsed generation: renders from it carry the
-``caveat`` note rather than posing as ground truth.
+A URL fetch is therefore never *silent* — it is either asked for at
+parse time or said out loud before it starts — and because the CLI
+never saw the original bytes, an attached copy is not verifiable
+against the parsed generation: renders from it carry the ``caveat``
+note rather than posing as ground truth.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+import typer
 
 from .store import JobStore, replace_with_retry
 
@@ -118,13 +122,19 @@ def download(
     *,
     transport: httpx.BaseTransport,
     now: float,
+    progress=None,
 ) -> tuple[str, int]:
     """Fetch the item's URL source and attach the copy; returns
     ``(filename, bytes)``. Raises AttachError with the remediation —
     pre-signed URLs expire, so a late fetch failing is the expected
-    failure mode, not a surprise."""
+    failure mode, not a surprise. ``progress`` (a ``guarantee.Progress``)
+    reports received/total per chunk; a body without Content-Length
+    still shows the moving label, just without a percentage."""
     url = meta.get("source") or ""
     name = copy_name(url)
+    label = f"downloading {name}"
+    if progress is not None:
+        progress.update(label=label)
     target = jobs.item_dir(item_id) / name
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(f".{name}.tmp-{os.getpid()}")
@@ -156,6 +166,7 @@ def download(
                         f"{MAX_COPY_BYTES}-byte attach cap; parse the local "
                         "file instead (ade parse -d <file>).",
                     )
+                total = int(declared) if declared.isdigit() else 0
                 with tmp.open("wb") as sink:
                     for chunk in response.iter_bytes():
                         received += len(chunk)
@@ -168,6 +179,10 @@ def download(
                             )
                         digest.update(chunk)
                         sink.write(chunk)
+                        if progress is not None and total:
+                            progress.update(
+                                label=label, fraction=received / total
+                            )
     except httpx.HTTPError as error:
         tmp.unlink(missing_ok=True)
         raise AttachError(
@@ -198,3 +213,44 @@ def download(
         )
         jobs.write_json(item_id, "meta.json", current)
     return name, received
+
+
+def download_with_notice(
+    jobs: JobStore,
+    item_id: str,
+    meta: dict,
+    *,
+    ports,
+    as_json: bool,
+) -> tuple[str, int]:
+    """``download`` with the say-it-out-loud surface around it: a stderr
+    notice naming why the network is about to be touched and how to
+    suppress it, then a progress line while the body streams. stderr
+    only, fully silent under ``--json`` (the payload carries the
+    receipt); raises AttachError exactly like ``download``."""
+    # Lazy import mirrors update.py's: guarantee.py imports update, which
+    # would make a top-level import here a needlessly heavy chain.
+    from .guarantee import Progress
+
+    if not as_json:
+        typer.echo(
+            f"note: job item {item_id} was parsed from a URL and no local "
+            "copy is attached — downloading it so page imagery can render "
+            "(skip with --no-download)",
+            err=True,
+        )
+    progress = Progress(
+        ports.clock,
+        "off" if as_json else ("tty" if ports.stderr_is_tty() else "plain"),
+    )
+    try:
+        return download(
+            jobs,
+            item_id,
+            meta,
+            transport=ports.transport,
+            now=ports.clock.now(),
+            progress=progress,
+        )
+    finally:
+        progress.close()

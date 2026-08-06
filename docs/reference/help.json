@@ -472,7 +472,7 @@
           "metavar": null,
           "required": false,
           "default": null,
-          "help": "--document-url only: also download the document into the job item (plain HTTP, no API credits) so page previews and crops render locally \u2014 fetched now, while the URL (often pre-signed) still works. Without it, URL parses have no local bytes and the viewer explains how to fetch them later (`ade view <id> --download`)."
+          "help": "--document-url only: also download the document into the job item (plain HTTP, no API credits) so page previews and crops render locally \u2014 fetched now, while the URL (often pre-signed) still works. Without it, the first `view`/`crop` fetches the copy instead, by which time a pre-signed URL may have expired."
         },
         {
           "flags": "--include",
@@ -999,11 +999,11 @@
           "help": "Pages to embed images for, 1-indexed, e.g. '1,3-5'."
         },
         {
-          "flags": "--download",
+          "flags": "--download, --no-download",
           "metavar": null,
           "required": false,
           "default": null,
-          "help": "URL-parsed items: fetch the document from its recorded URL into the job item and render page previews from that copy \u2014 the parse itself never gives the CLI the bytes (#169). Plain HTTP, no API credits; the copy is unverified against the parsed run. Also works on an extract item id (fetches into its referenced parse item)."
+          "help": "URL-parsed items: fetch the document from its recorded URL into the job item and render page previews from that copy \u2014 the parse itself never gives the CLI the bytes (#169). This happens automatically when no copy is attached yet (a notice and progress line land on stderr); --no-download skips the fetch and previews stay empty. Explicit --download makes a failed fetch an error instead of a warning. Plain HTTP, no API credits; the copy is unverified against the parsed run. Also works on an extract item id (fetches into its referenced parse item)."
         },
         {
           "flags": "--no-sidebar-sync",
@@ -1061,7 +1061,11 @@
           },
           {
             "key": "downloaded",
-            "what": "with --download: true when this run fetched the URL document into the job item (false: already attached)"
+            "what": "URL items: true when this run fetched the document into the job item (automatic on first view; false: already attached, or the automatic fetch failed \u2014 see download_error)"
+          },
+          {
+            "key": "download_error",
+            "what": "why the automatic fetch failed, when it did (the viewer still builds, previews empty; else absent)"
           },
           {
             "key": "deep_link",
@@ -1139,6 +1143,13 @@
           "required": false,
           "default": null,
           "help": "Open the crop (or the directory holding them)."
+        },
+        {
+          "flags": "--download, --no-download",
+          "metavar": null,
+          "required": false,
+          "default": null,
+          "help": "URL-parsed items: fetch the document from its recorded URL into the job item and crop from that copy \u2014 the parse itself never gives the CLI the bytes (#169). This happens automatically when no copy is attached yet (a notice and progress line land on stderr); --no-download skips the fetch, and the crop then fails honestly (a crop has no empty-imagery fallback)."
         }
       ],
       "supports_json": true,
@@ -1331,7 +1342,7 @@
       },
       {
         "path": "  document.<ext>",
-        "what": "URL parses: the attached document copy (`parse --keep-copy` / `view --download`) page previews and crops render from \u2014 unverified against the parsed run"
+        "what": "URL parses: the attached document copy (`parse --keep-copy`, or fetched automatically on first `view`/`crop`) page previews and crops render from \u2014 unverified against the parsed run"
       },
       {
         "path": "  view.html / crops/",

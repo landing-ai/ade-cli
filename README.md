@@ -122,7 +122,7 @@ open it exits immediately, naming all three paths.
 |---|---|
 | `ade parse -d invoice.pdf` | ensure parsed; artifacts land in `~/.ade` |
 | `ade parse --document-url https://…/doc.pdf` | server fetches the URL |
-| `ade parse --document-url https://… --keep-copy` | also store the document bytes locally, so page previews and crops render |
+| `ade parse --document-url https://… --keep-copy` | also store the document bytes locally, while the (often pre-signed) URL still works |
 | `ade parse -d doc.pdf --tier standard --wait 0` | cheap lane, submit-and-return |
 | `ade parse -d doc.pdf --env eu` | run in the EU region (or `export ADE_ENV=eu`) |
 | `ade parse -d doc.pdf --include markdown --json` | carry the markdown in the payload |
@@ -203,12 +203,14 @@ On a terminal, `view` opens the viewer in your browser by default
 (`--no-open` suppresses it); `--json` runs and piped output never
 launch a browser — the artifact path is in the output either way.
 Without a JOB_ITEM_ID, `view` targets the latest viewable job item.
-URL-parsed items have no local document bytes, so page previews can't
-render until you fetch them: `ade view <id> --download` attaches a copy
-of the document to the job item (plain HTTP, no API credits — but note
-pre-signed URLs expire, so `parse --keep-copy` at parse time is the
-reliable way), after which previews and crops render from it with an
-"unverified against the parsed run" caveat.
+URL-parsed items have no local document bytes, so on first `view` or
+`crop` the CLI fetches a copy of the document into the job item
+automatically — announced on stderr with a progress line, plain HTTP,
+no API credits (`--no-download` skips the fetch; previews then stay
+empty). Note pre-signed URLs expire, so `parse --keep-copy` at parse
+time is the reliable way to secure the bytes. Previews and crops render
+from the attached copy with an "unverified against the parsed run"
+caveat.
 
 Every job item gets a **self-contained `view.html`**: page images with
 bounding-box overlays beside the parsed markdown (or extraction JSON),

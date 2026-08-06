@@ -183,7 +183,7 @@ def _referencing_extractions(
 def _imagery_source(store: JobStore, bundle: dict) -> str | None:
     """What this bundle's page imagery renders from: the parse item's
     recorded source, or its attached copy for URL parses (#169 —
-    `parse --keep-copy` / `view --download`)."""
+    `parse --keep-copy`, or fetched on first `view`/`crop`)."""
     owner = bundle.get("parse_item_id") or bundle["record"]["job_item_id"]
     return attach.renderable_source(store, owner, bundle["parse_meta"])
 
@@ -642,13 +642,15 @@ def _build(
     banner_note = note
     # A URL item's missing preview gets the id-bearing action (#169): the
     # cause comes from the raster layer; the command that fixes it needs
-    # the item id, which only this layer holds.
+    # the item id, which only this layer holds. The fetch is automatic
+    # now, so this note survives only a failed or suppressed download —
+    # the action is a retry, not a flag to discover.
     if note and note.startswith("source unavailable: parsed from a URL"):
         owner_id = bundle.get("parse_item_id") or item_id
         action = (
-            f" Fetch them with `ade view {items.short_id(store, owner_id)} "
-            "--download`, or keep a copy at parse time with "
-            "`parse --keep-copy`."
+            f" Re-run `ade view {items.short_id(store, owner_id)} "
+            "--download` to fetch them, or keep a copy at parse time "
+            "with `parse --keep-copy`."
         )
         note += action
         banner_note = note
@@ -985,14 +987,18 @@ def view(
     pages: str | None = typer.Option(
         None, "--pages", help="Pages to embed images for, 1-indexed, e.g. '1,3-5'."
     ),
-    download: bool = typer.Option(
-        False, "--download",
+    download: bool | None = typer.Option(
+        None, "--download/--no-download",
         help="URL-parsed items: fetch the document from its recorded URL "
         "into the job item and render page previews from that copy — "
-        "the parse itself never gives the CLI the bytes (#169). Plain "
-        "HTTP, no API credits; the copy is unverified against the "
-        "parsed run. Also works on an extract item id (fetches into "
-        "its referenced parse item).",
+        "the parse itself never gives the CLI the bytes (#169). This "
+        "happens automatically when no copy is attached yet (a notice "
+        "and progress line land on stderr); --no-download skips the "
+        "fetch and previews stay empty. Explicit --download makes a "
+        "failed fetch an error instead of a warning. Plain HTTP, no API "
+        "credits; the copy is unverified against the parsed run. Also "
+        "works on an extract item id (fetches into its referenced parse "
+        "item).",
     ),
     no_sidebar_sync: bool = typer.Option(
         False, "--no-sidebar-sync",
@@ -1112,12 +1118,19 @@ def view(
 
     record = items.item_record(store, item_id)
 
-    # --download (#169): attach the URL document's bytes to the imagery
-    # owner (the item itself, or a referencing extract's parse item)
-    # BEFORE the bundle loads, so this same run renders from the copy.
+    # Attaching the URL document's bytes happens on the imagery owner
+    # (the item itself, or a referencing extract's parse item) BEFORE the
+    # bundle loads, so this same run renders from the copy. Default is
+    # AUTO (#169 follow-up): a URL-sourced item with no attached copy
+    # fetches now — announced on stderr, never silently — because an
+    # empty preview surprised users more than an implicit fetch;
+    # --no-download suppresses. Explicit --download keeps the strict
+    # contract: wrong-kind items and failed fetches are errors, and the
+    # already-attached case still gets its receipt line.
     download_line = ""
     downloaded: bool | None = None
-    if download:
+    download_error: str | None = None
+    if download is not False:
         if record["kind"] == "parse":
             owner_id = item_id
         else:
@@ -1128,7 +1141,8 @@ def view(
         owner_meta = (
             store.read_json(owner_id, "meta.json") if owner_id else None
         )
-        if not owner_id or not attach.is_url_source(owner_meta):
+        url_source = owner_id is not None and attach.is_url_source(owner_meta)
+        if download and not url_source:
             message = (
                 f"Job item {item_id} has no URL source to download: "
                 "--download applies to items parsed from --document-url "
@@ -1144,38 +1158,54 @@ def view(
                 as_json=as_json,
                 code=EXIT_USAGE,
             )
-        already = attach.attached_file(store, owner_id, owner_meta)
-        if already is not None:
+        already = (
+            attach.attached_file(store, owner_id, owner_meta)
+            if url_source
+            else None
+        )
+        if download and already is not None:
             downloaded = False
             download_line = (
                 f"\n  download: copy already attached ({already.name}); "
                 "previews render from it"
             )
-        else:
+        elif url_source and already is None:
             try:
-                name, size = attach.download(
+                name, size = attach.download_with_notice(
                     store,
                     owner_id,
                     owner_meta or {},
-                    transport=ports.transport,
-                    now=ports.clock.now(),
+                    ports=ports,
+                    as_json=as_json,
                 )
             except attach.AttachError as error:
-                exit_with(
-                    {
-                        "error": error.kind,
-                        "job_item_id": owner_id,
-                        "message": error.message,
-                    },
-                    error.message,
-                    as_json=as_json,
-                    code=EXIT_FAILED,
+                if download:
+                    exit_with(
+                        {
+                            "error": error.kind,
+                            "job_item_id": owner_id,
+                            "message": error.message,
+                        },
+                        error.message,
+                        as_json=as_json,
+                        code=EXIT_FAILED,
+                    )
+                # Auto mode degrades instead of failing: yesterday's
+                # working `ade view` must not start exiting non-zero the
+                # day the pre-signed URL expires — the viewer still
+                # builds, with the honest empty-preview note.
+                downloaded = False
+                download_error = error.message
+                download_line = (
+                    "\n  download: failed — page previews stay empty "
+                    f"({error.message})"
                 )
-            downloaded = True
-            download_line = (
-                f"\n  download: fetched {name} ({size:,} bytes) into job "
-                f"item {owner_id}"
-            )
+            else:
+                downloaded = True
+                download_line = (
+                    f"\n  download: fetched {name} ({size:,} bytes) into "
+                    f"job item {owner_id}"
+                )
 
     try:
         bundle = _load_bundle(store, item_id)
@@ -1223,8 +1253,8 @@ def view(
             if "parsed from a URL" in message:
                 owner_id = bundle.get("parse_item_id") or item_id
                 message += (
-                    f" Fetch it with `ade view {owner_id} --download`, "
-                    "then re-run."
+                    f" Re-run `ade view {owner_id} --download` to fetch "
+                    "it, then re-run this crop."
                 )
                 tail = ""
             else:
@@ -1381,6 +1411,8 @@ def view(
     }
     if downloaded is not None:
         payload["downloaded"] = downloaded
+    if download_error is not None:
+        payload["download_error"] = download_error
     hint = f"ade view {items.short_id(store, item_id)} --open" + (
         f" --element-id {element_id}" if element_id else ""
     )

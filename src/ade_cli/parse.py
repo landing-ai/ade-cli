@@ -157,9 +157,9 @@ def parse(
         help="--document-url only: also download the document into the "
         "job item (plain HTTP, no API credits) so page previews and "
         "crops render locally — fetched now, while the URL (often "
-        "pre-signed) still works. Without it, URL parses have no local "
-        "bytes and the viewer explains how to fetch them later "
-        "(`ade view <id> --download`).",
+        "pre-signed) still works. Without it, the first `view`/`crop` "
+        "fetches the copy instead, by which time a pre-signed URL may "
+        "have expired.",
     ),
     include: list[Include] = typer.Option(
         [],
@@ -324,8 +324,8 @@ def parse(
                 # a warning with the later remediation, never a failure.
                 copy_line = (
                     f"\n  copy:    keep-copy failed — {copy_info['error']} "
-                    f"(the parse succeeded; `ade view {ref} --download` "
-                    "can fetch the copy later)"
+                    f"(the parse succeeded; `ade view {ref}` retries the "
+                    "fetch automatically)"
                 )
             else:
                 copy_line = (
