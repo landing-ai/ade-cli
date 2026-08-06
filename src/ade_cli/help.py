@@ -172,7 +172,8 @@ RESULTS: dict[str, dict] = {
             ("job_item_id", "store key every other verb takes"),
             ("environment", "resolved environment"),
             ("version", "resolved parse model version"),
-            ("credits", "credits billed (0 on a cached hit)"),
+            ("credits", "credits the run billed (a cached hit echoes the "
+             "original run's bill; nothing new is billed — see cached)"),
             ("tier", "service tier the run was billed at"),
             ("page_count", "pages parsed"),
             ("failed_pages", "1-indexed pages the server could not parse"),
@@ -197,7 +198,8 @@ RESULTS: dict[str, dict] = {
             ("parse_job_item_id", "the parse it references (absent for markdown)"),
             ("environment", "resolved environment"),
             ("version", "resolved extract model version"),
-            ("credits", "credits billed (0 on a cached hit)"),
+            ("credits", "credits the run billed (a cached hit echoes the "
+             "original run's bill; nothing new is billed — see cached)"),
             ("tier", "service tier the run was billed at"),
             ("extraction", "THE RESULT: the schema-shaped object, verbatim"),
             ("fields", "number of leaf fields"),

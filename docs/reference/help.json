@@ -515,7 +515,7 @@
           },
           {
             "key": "credits",
-            "what": "credits billed (0 on a cached hit)"
+            "what": "credits the run billed (a cached hit echoes the original run's bill; nothing new is billed \u2014 see cached)"
           },
           {
             "key": "tier",
@@ -685,7 +685,7 @@
           },
           {
             "key": "credits",
-            "what": "credits billed (0 on a cached hit)"
+            "what": "credits the run billed (a cached hit echoes the original run's bill; nothing new is billed \u2014 see cached)"
           },
           {
             "key": "tier",

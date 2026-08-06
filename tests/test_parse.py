@@ -316,6 +316,26 @@ def test_different_params_on_the_same_file_are_sibling_variants(cli, document):
     assert len(cli.transport.requests) == 4  # two submits + two polls only
 
 
+def test_cached_hit_echoes_the_original_bill(cli, document):
+    # The published contract: a cached hit re-bills nothing, and `credits`
+    # echoes what the original run billed — `cached: true` is the
+    # free-serve marker, matching the summary's credits line.
+    cli.transport.respond(202, {"job_id": JOB_ID})
+    cli.transport.respond(200, completed_job(parse_response(total_credits=1.1)))
+    billed = json.loads(
+        cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV).stdout
+    )
+
+    cached = json.loads(
+        cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV).stdout
+    )
+
+    assert billed["credits"] == 1.1
+    assert cached["cached"] is True
+    assert cached["credits"] == 1.1  # the original bill, never zeroed
+    assert cached["tier"] == billed["tier"]
+
+
 def test_failed_pages_and_206_surface_in_summary_and_metadata(cli, document):
     data = parse_response(page_count=5, failed_pages=[1, 3])
     cli.transport.respond(202, {"job_id": JOB_ID})

@@ -101,6 +101,26 @@ def test_same_item_and_schema_twice_is_one_submit_total(cli, document, schema_fi
     assert len(extract_posts(cli)) == 1
 
 
+def test_cached_extract_echoes_the_original_bill(cli, document, schema_file):
+    # Same contract as parse: the free cached hit reports the original
+    # run's bill next to cached=true, never a zero.
+    parse_id = parse_doc(cli, document)
+    first = complete_extract(
+        cli, parse_id, "--schema", str(schema_file),
+        result=extract_result(total_credits=1.1),
+    )
+
+    again = cli.invoke(
+        "extract", parse_id, "--schema", str(schema_file), "--json", env=AUTH_ENV
+    )
+
+    payload = json.loads(again.stdout)
+    assert first["credits"] == 1.1
+    assert payload["cached"] is True
+    assert payload["credits"] == 1.1  # the original bill, never zeroed
+    assert payload["tier"] == first["tier"]
+
+
 def test_extract_item_references_the_parse_never_copies_it(
     cli, document, schema_file
 ):
