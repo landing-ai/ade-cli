@@ -33,6 +33,20 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
+      # workflow_call enforces the secret via `required: true`, but a
+      # direct workflow_dispatch does not: a missing secret expands to ""
+      # and the whole suite would skip itself — a green run that never
+      # touched production. Fail loudly instead.
+      - name: Require the production API key
+        shell: bash
+        env:
+          ADE_INTEGRATION_API_KEY: ${{ secrets.ADE_INTEGRATION_API_KEY }}
+        run: |
+          if [ -z "$ADE_INTEGRATION_API_KEY" ]; then
+            echo "::error::ADE_INTEGRATION_API_KEY secret is empty or unset — the suite would silently skip every test"
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - name: Install uv

@@ -76,6 +76,10 @@ def test_integration_suite_runs_on_macos_and_windows():
     assert "pull_request:" not in text
     assert "ADE_INTEGRATION_API_KEY" in text
     assert "tests/integration" in text
+    # An unset secret expands to "" under workflow_dispatch, the suite
+    # skips itself, and the run reads green having touched nothing — the
+    # workflow must fail loudly on an empty key instead.
+    assert 'if [ -z "$ADE_INTEGRATION_API_KEY" ]' in text
 
 
 def test_integration_tests_skip_without_the_live_key():
