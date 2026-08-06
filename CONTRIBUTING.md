@@ -26,8 +26,10 @@ ADE_INTEGRATION_API_KEY=<key> uv run pytest tests/integration -v
 ```
 
 In CI it runs via `.github/workflows/integration.yml` on macOS and
-Windows — manually from **Actions → Integration → "Run workflow"**, and
-automatically as the release gate (below).
+Windows — on every push to `main` (a merged PR that breaks production
+integration surfaces immediately), manually from **Actions →
+Integration → "Run workflow"**, and as the release gate (below). Never
+on pull requests: PR CI (`ci.yml`) runs the offline suite only.
 
 ## Install from source (no clone)
 

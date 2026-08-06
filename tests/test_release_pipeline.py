@@ -64,16 +64,19 @@ def test_release_gates_on_the_live_integration_suite():
 
 
 def test_integration_suite_runs_on_macos_and_windows():
-    """The two platforms customers install on (issue #175). Manual
-    dispatch stays available, and push/PR must never trigger it — every
-    run bills real parse + extract credits against production."""
+    """The two platforms customers install on (issue #175). Post-merge
+    pushes to main run it (early signal) and manual dispatch stays
+    available, but pull_request must never trigger it — every run bills
+    real parse + extract credits against production, and fork PRs must
+    never reach the secret."""
     text = INTEGRATION.read_text(encoding="utf-8")
     assert "workflow_dispatch" in text
     assert "workflow_call" in text
+    assert re.search(r"push:\s*\n\s*branches: \[main\]", text)
+    # A trigger key, not prose: pull_request and pull_request_target both.
+    assert not re.search(r"^\s*pull_request\w*:", text, re.MULTILINE)
     assert re.search(r"runner:\s*macos-", text)
     assert re.search(r"runner:\s*windows-", text)
-    assert "push:" not in text
-    assert "pull_request:" not in text
     assert "ADE_INTEGRATION_API_KEY" in text
     assert "tests/integration" in text
     # An unset secret expands to "" under workflow_dispatch, the suite

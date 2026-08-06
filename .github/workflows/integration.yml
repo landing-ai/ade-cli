@@ -2,17 +2,21 @@
 # production — auth, parse, extract, then the local verbs (find, crop)
 # over what production returned — on macOS and Windows, the two
 # platforms customers install on. Three ways in:
+#   - every push to main (a merged PR that breaks production integration
+#     surfaces immediately, not at the next release),
 #   - the release pipeline calls it (workflow_call) and won't tag or
 #     build until it passes,
-#   - Actions -> Integration -> "Run workflow" for a manual check,
-#   - nothing else: it never runs on push/PR, because every run bills
-#     real parse + extract credits (one of each per OS).
+#   - Actions -> Integration -> "Run workflow" for a manual check.
+# Never on pull_request: every run bills real parse + extract credits
+# (one of each per OS), and fork PRs must not reach the secret.
 # The tests live in tests/integration/ and skip themselves unless
 # ADE_INTEGRATION_API_KEY is set, so the offline suite stays hermetic.
 # Contract-tested by tests/test_release_pipeline.py.
 name: Integration
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
   workflow_call:
     secrets:
