@@ -184,8 +184,10 @@ clearing a parse item cascades to the extractions referencing it.
 - **`--markdown` extractions have no page evidence** (there is no parse
   to join against) — evidence degrades to spans-only, and `view`
   renders the markdown pane alone.
-- **URL parses have no local bytes**, so `view`/`crop` cannot render
-  page imagery until you attach a copy: `parse --document-url …
-  --keep-copy` at parse time (reliable — pre-signed URLs expire), or
-  `ade view <id> --download` after the fact. Markdown, elements, and
-  extractions work either way.
+- **URL parses have no local bytes**, so page imagery renders from an
+  attached copy: `parse --document-url … --keep-copy` fetches it at
+  parse time (reliable — pre-signed URLs expire); otherwise the first
+  `view`/`crop` downloads it automatically (`--no-download` skips;
+  the payload records `downloaded`, and on a failed fetch `view`
+  degrades to an empty preview with `download_error` while `crop`
+  errors). Markdown, elements, and extractions work either way.
