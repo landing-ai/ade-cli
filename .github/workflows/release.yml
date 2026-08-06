@@ -28,7 +28,7 @@ jobs:
   integration:
     uses: ./.github/workflows/integration.yml
     secrets:
-      VISION_AGENT_API_KEY: ${{ secrets.VISION_AGENT_API_KEY }}
+      ADE_INTEGRATION_API_KEY: ${{ secrets.ADE_INTEGRATION_API_KEY }}
 
   check:
     needs: integration

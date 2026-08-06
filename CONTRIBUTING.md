@@ -73,7 +73,7 @@ release is the tag `v<version>`:
 
 The `Release` workflow (`.github/workflows/release.yml`) first runs the
 live integration suite against production on macOS and Windows
-(`integration.yml`, secret `VISION_AGENT_API_KEY`) — a dispatch release
+(`integration.yml`, secret `ADE_INTEGRATION_API_KEY`) — a dispatch release
 isn't even tagged until it passes. It then refuses a tag
 that doesn't match `pyproject.toml`, re-runs the test suite, builds a
 standalone PyInstaller app for each of the six platforms (macOS /

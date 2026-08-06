@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
   workflow_call:
     secrets:
-      VISION_AGENT_API_KEY:
+      ADE_INTEGRATION_API_KEY:
         description: Production ADE API key the suite authenticates with
         required: true
 
@@ -45,5 +45,5 @@ jobs:
 
       - name: Run integration suite against production
         env:
-          ADE_INTEGRATION_API_KEY: ${{ secrets.VISION_AGENT_API_KEY }}
+          ADE_INTEGRATION_API_KEY: ${{ secrets.ADE_INTEGRATION_API_KEY }}
         run: uv run pytest tests/integration -v
