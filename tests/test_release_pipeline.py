@@ -17,6 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+INTEGRATION = ROOT / ".github" / "workflows" / "integration.yml"
 INSTALL_SH = ROOT / "scripts" / "install.sh"
 INSTALL_PS1 = ROOT / "scripts" / "install.ps1"
 INSTALL_CMD = ROOT / "scripts" / "install.cmd"
@@ -49,6 +50,43 @@ def test_release_workflow_is_manually_dispatchable():
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_dispatch" in text
     assert "git tag" in text
+
+
+def test_release_gates_on_the_live_integration_suite():
+    """Issue #175: nothing ships without the production integration suite
+    passing. The gate must sit ahead of `check` — under manual dispatch
+    `check` pushes the release tag, so a failed gate must leave no tag —
+    and everything downstream inherits it through `needs`."""
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert "uses: ./.github/workflows/integration.yml" in text
+    check_job = text.split("\n  check:", 1)[1]
+    assert re.search(r"^\s*needs: integration\b", check_job, re.MULTILINE)
+
+
+def test_integration_suite_runs_on_macos_and_windows():
+    """The two platforms customers install on (issue #175). Manual
+    dispatch stays available, and push/PR must never trigger it — every
+    run bills real parse + extract credits against production."""
+    text = INTEGRATION.read_text(encoding="utf-8")
+    assert "workflow_dispatch" in text
+    assert "workflow_call" in text
+    assert re.search(r"runner:\s*macos-", text)
+    assert re.search(r"runner:\s*windows-", text)
+    assert "push:" not in text
+    assert "pull_request:" not in text
+    assert "ADE_INTEGRATION_API_KEY" in text
+    assert "tests/integration" in text
+
+
+def test_integration_tests_skip_without_the_live_key():
+    """The offline suite must stay hermetic: every test in
+    tests/integration/ hangs off the ADE_INTEGRATION_API_KEY gate."""
+    for path in sorted((ROOT / "tests" / "integration").glob("test_*.py")):
+        text = path.read_text(encoding="utf-8")
+        assert "ADE_INTEGRATION_API_KEY" in text, f"{path.name} misses the gate"
+        assert re.search(r"^pytestmark = pytest\.mark\.skipif", text, re.MULTILINE), (
+            f"{path.name} does not skip module-wide without the key"
+        )
 
 
 def test_release_builds_onedir_not_onefile():

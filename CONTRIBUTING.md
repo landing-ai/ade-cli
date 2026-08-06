@@ -15,6 +15,20 @@ uv run pytest -q
 Tests are fully offline (fake transport). Lint config lives in
 `pyproject.toml` (`ruff`).
 
+The one exception is `tests/integration/` — a live suite that drives
+the CLI as real subprocesses against production (auth, parse, extract,
+find, crop). It skips itself entirely unless `ADE_INTEGRATION_API_KEY`
+holds a production API key, so it never runs by accident; when it does
+run it bills real credits (one parse + one extract). Run it on demand:
+
+```sh
+ADE_INTEGRATION_API_KEY=<key> uv run pytest tests/integration -v
+```
+
+In CI it runs via `.github/workflows/integration.yml` on macOS and
+Windows — manually from **Actions → Integration → "Run workflow"**, and
+automatically as the release gate (below).
+
 ## Install from source (no clone)
 
 ```sh
@@ -57,7 +71,10 @@ release is the tag `v<version>`:
    tags `v<version>` itself, refusing an already-released version), or
    locally: `git tag v0.3.0 && git push origin v0.3.0`.
 
-The `Release` workflow (`.github/workflows/release.yml`) refuses a tag
+The `Release` workflow (`.github/workflows/release.yml`) first runs the
+live integration suite against production on macOS and Windows
+(`integration.yml`, secret `VISION_AGENT_API_KEY`) — a dispatch release
+isn't even tagged until it passes. It then refuses a tag
 that doesn't match `pyproject.toml`, re-runs the test suite, builds a
 standalone PyInstaller app for each of the six platforms (macOS /
 Linux / Windows × arm64 / x86_64), runs `ade version` on every one, and

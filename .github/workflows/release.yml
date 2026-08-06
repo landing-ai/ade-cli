@@ -6,6 +6,10 @@
 #   - Actions -> Release -> "Run workflow" on main (no clone needed): the
 #     workflow tags v<pyproject version> itself. The tagging must live in
 #     here — a tag pushed with GITHUB_TOKEN never triggers workflows.
+# Either way the live integration suite (integration.yml: auth, parse,
+# extract, find, crop against production on macOS + Windows) must pass
+# first — check depends on it, so a dispatch release isn't even tagged
+# until production integration is green.
 # Contract-tested by tests/test_release_pipeline.py.
 name: Release
 
@@ -18,7 +22,16 @@ permissions:
   contents: write
 
 jobs:
+  # The release gate (issue #175): the live macOS + Windows suite against
+  # production. First on purpose — under manual dispatch `check` pushes
+  # the release tag, and a failed gate must leave no tag behind.
+  integration:
+    uses: ./.github/workflows/integration.yml
+    secrets:
+      VISION_AGENT_API_KEY: ${{ secrets.VISION_AGENT_API_KEY }}
+
   check:
+    needs: integration
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}

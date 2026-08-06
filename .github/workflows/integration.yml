@@ -1,0 +1,49 @@
+# Live integration suite (issue #175): drives the real CLI against
+# production — auth, parse, extract, then the local verbs (find, crop)
+# over what production returned — on macOS and Windows, the two
+# platforms customers install on. Three ways in:
+#   - the release pipeline calls it (workflow_call) and won't tag or
+#     build until it passes,
+#   - Actions -> Integration -> "Run workflow" for a manual check,
+#   - nothing else: it never runs on push/PR, because every run bills
+#     real parse + extract credits (one of each per OS).
+# The tests live in tests/integration/ and skip themselves unless
+# ADE_INTEGRATION_API_KEY is set, so the offline suite stays hermetic.
+# Contract-tested by tests/test_release_pipeline.py.
+name: Integration
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      VISION_AGENT_API_KEY:
+        description: Production ADE API key the suite authenticates with
+        required: true
+
+jobs:
+  integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            runner: macos-latest
+          - platform: windows
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Sync dependencies
+        run: uv sync --locked
+
+      - name: Run integration suite against production
+        env:
+          ADE_INTEGRATION_API_KEY: ${{ secrets.VISION_AGENT_API_KEY }}
+        run: uv run pytest tests/integration -v
