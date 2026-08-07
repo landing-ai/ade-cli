@@ -1,8 +1,13 @@
-"""Style guard for the help surface: inline code is always backticked.
+"""Style guards for the help surface: backticked inline code, and no
+references a reader outside this repo cannot follow.
 
 A bare ``--flag`` in help prose is ambiguous for agents and renders as
 an em dash plus the flag name on the hosted docs, which generate the
 CLI reference from ``help --json``. See docs/agents/writing-style.md.
+
+An issue number is dead weight to everyone reading the shipped binary:
+it resolves only against this repo's tracker, so ``help`` prose states
+the behavior and leaves the number to the commit history.
 
 Scope: every prose field in the help surface. Topic bodies are exempt:
 they are pre-formatted terminal layouts (aligned flag columns, literal
@@ -21,6 +26,9 @@ import pytest
 # A long flag in prose that is not already inside a backtick span.
 CODE_SPAN = re.compile(r"`[^`]*`")
 BARE_FLAG = re.compile(r"(?<![\w`-])--[a-z][a-z0-9-]*")
+# An issue reference: "(#169)" or a standalone "#169". The lookbehind
+# spares URL fragments, which are legitimate prose (view.html#element).
+ISSUE_REF = re.compile(r"(?<![\w/=.])#\d+\b")
 
 
 @pytest.fixture
@@ -64,4 +72,16 @@ def test_flags_in_help_prose_are_backticked(reference):
     assert not offenders, (
         "Bare flags in help prose; wrap them in backticks "
         "(docs/agents/writing-style.md):\n" + "\n".join(offenders)
+    )
+
+
+def test_help_prose_has_no_issue_references(reference):
+    """No help prose cites an issue number the reader cannot open."""
+    offenders = []
+    for locator, text in _prose_strings(reference):
+        for match in ISSUE_REF.findall(text):
+            offenders.append(f"{locator}: {match}")
+    assert not offenders, (
+        "Issue references in help prose; state the behavior and drop the "
+        "number (docs/agents/writing-style.md):\n" + "\n".join(offenders)
     )

@@ -9,6 +9,10 @@ README, and SKILL.md.
 - Second person ("you"), active voice, direct language.
 - No promotional language. Describe what a thing does.
 - No idioms. Plain wording wins.
+- Cite what a reader outside this repo can open: public docs, `ade help`
+  topics, and shipped flags.
+- Leave out issue numbers (enforced), internal URLs, and anything that
+  resolves only inside LandingAI.
 - Test every code example before it lands. Fence README and SKILL.md
   code blocks with a language tag.
 - Error and status messages state what happened and what to do next.
