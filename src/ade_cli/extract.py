@@ -457,6 +457,7 @@ def extract(
         auth=oauth.bearer_auth(home, resolved, active, ports),
         transport=ports.transport,
         command="extract",
+        org_id=active.org_id,
     )
 
     if parse_first is not None:

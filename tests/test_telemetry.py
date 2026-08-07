@@ -43,6 +43,8 @@ def test_the_walked_tree_matches_the_expected_commands():
         [
             ("auth", "login"),
             ("auth", "logout"),
+            ("auth", "org", "list"),
+            ("auth", "org", "switch"),
             ("auth", "status"),
             ("crop",),
             ("extract",),

@@ -207,6 +207,7 @@ def parse(
         auth=oauth.bearer_auth(home, resolved, active, ports),
         transport=ports.transport,
         command="parse",
+        org_id=active.org_id,
     )
     jobs = store.JobStore(home)
     # --options is the full ParseOptions object, passed through verbatim —

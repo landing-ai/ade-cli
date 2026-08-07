@@ -27,6 +27,14 @@ own checks diagnose a headless environment.
 ``logout`` de-auths one environment (the resolved target by default;
 ``--all`` clears every environment). ``status`` reports the resolved
 target plus every other environment holding a credential.
+
+Browser logins carry an organization selection (ADR-0009): memberships
+are discovered from Logto's userinfo after the token exchange, the
+selection is stored on the OAuth session, and it rides ``x-org-id`` on
+API requests (membership-verified by the platform per request). One
+membership selects itself; several prompt on a terminal (``--org`` picks
+without one); discovery failing never fails a login — the platform
+default organization applies until ``auth org switch`` sets one.
 """
 
 from __future__ import annotations
@@ -39,6 +47,7 @@ import typer
 
 from . import credentials, filelock, gateway, oauth, term
 from .config import (
+    DEFAULT_ENVIRONMENT,
     ENVIRONMENTS,
     ResolvedConfig,
     ade_home,
@@ -70,6 +79,12 @@ def login(
         help="Log in with this API key directly "
         "('-' prompts with hidden input).",
     ),
+    org: str | None = typer.Option(
+        None,
+        "--org",
+        help="Act in this Logto organization (id or name). Browser "
+        "(OAuth) logins only — API keys are already organization-bound.",
+    ),
     environment: str | None = typer.Option(None, "--env", help=_ENV_HELP),
     as_json: bool = JSON_FLAG,
 ) -> None:
@@ -79,8 +94,20 @@ def login(
     about the choice."""
     home = ade_home()
     resolved = resolve_target(home, environment, as_json=as_json)
+    if api_key is not None and org is not None:
+        exit_with(
+            {
+                "error": "org_with_api_key",
+                "message": "--org applies to browser (OAuth) logins; API "
+                "keys are already organization-bound.",
+            },
+            "--org applies to browser (OAuth) logins; API keys are already "
+            "organization-bound.",
+            as_json=as_json,
+            code=EXIT_USAGE,
+        )
     if api_key is None:
-        _login_without_key(ctx.obj, home, resolved, as_json=as_json)
+        _login_without_key(ctx.obj, home, resolved, org=org, as_json=as_json)
         return
 
     if api_key == "-":
@@ -227,16 +254,26 @@ def _verify_api_key(
 
 
 def _login_without_key(
-    ports: Ports, home, resolved: ResolvedConfig, *, as_json: bool
+    ports: Ports, home, resolved: ResolvedConfig, *, org: str | None, as_json: bool
 ) -> None:
     """No credential flag: *ensure* logged in on the target. A stored
     credential means there is nothing to do (credentials are per
-    environment; no selection exists to change). Otherwise acquire one —
-    a terminal prompts (the ADR-0002 method menu); a non-interactive run
-    takes a key piped on stdin, else the browser flow."""
+    environment; no selection exists to change) — unless --org names an
+    organization, which the guarantee then ensures too. Otherwise acquire
+    one — a terminal prompts (the ADR-0002 method menu); a non-interactive
+    run takes a key piped on stdin, else the browser flow. --org implies
+    the browser method, so it skips both the pipe and the menu."""
     existing = credentials.stored_credential(home, resolved.environment)
     if existing is not None:
+        if org is not None:
+            _ensure_org_on_existing(
+                ports, home, resolved, existing, org, as_json=as_json
+            )
+            return
         _emit_already(home, resolved, existing, as_json=as_json)
+        return
+    if org is not None:
+        _browser_login(ports, home, resolved, org=org, as_json=as_json)
         return
     # A key piped in is a prompt answered ahead of time — the headless
     # spelling of the same gesture (F2) — and it wins *before* the menu:
@@ -358,11 +395,225 @@ def _emit_already(
 
 
 def _browser_login(
-    ports: Ports, home, resolved: ResolvedConfig, *, as_json: bool
+    ports: Ports,
+    home,
+    resolved: ResolvedConfig,
+    *,
+    org: str | None = None,
+    as_json: bool,
 ) -> None:
     entry = _run_browser_flow(ports, home, resolved, as_json=as_json)
     credentials.store_oauth(home, resolved.environment, entry)
-    _emit_browser_login(home, resolved, entry, as_json=as_json)
+    # Tokens are durable before the org pick starts: a failed or skipped
+    # selection degrades to the platform default, never to a lost login.
+    organization, note = _select_org_after_login(
+        ports, home, resolved, requested=org, as_json=as_json
+    )
+    _emit_browser_login(
+        home, resolved, entry, organization=organization, note=note, as_json=as_json
+    )
+
+
+def _org_switch_hint(resolved: ResolvedConfig) -> str:
+    """The `auth org switch` invocation for *this* target, mirroring
+    login_hint's --env rule."""
+    suffix = (
+        f" --env {resolved.environment}"
+        if resolved.environment != DEFAULT_ENVIRONMENT
+        else ""
+    )
+    return f"ade auth org switch <org>{suffix}"
+
+
+def _select_org_after_login(
+    ports: Ports,
+    home,
+    resolved: ResolvedConfig,
+    *,
+    requested: str | None,
+    as_json: bool,
+) -> tuple[dict | None, str | None]:
+    """The post-login org pick: (selection, note-for-humans). An explicit
+    --org that cannot be honored fails the command (the user asked for a
+    state the login didn't reach — though the tokens are stored); the
+    automatic pick degrades to a note instead, because a login must never
+    be lost to a discovery hiccup."""
+    try:
+        organizations = oauth.fetch_organizations(home, resolved.environment, ports)
+    except oauth.OrgDiscoveryError as error:
+        if requested is not None:
+            exit_with(
+                {
+                    "error": f"org_{error.reason}",
+                    "message": error.message,
+                    "stored": True,
+                },
+                f"Logged in, but selecting an organization failed: "
+                f"{error.message}. The tokens are stored; run "
+                f"`{_org_switch_hint(resolved)}` once the problem is fixed.",
+                as_json=as_json,
+                code=EXIT_FAILED,
+            )
+        return None, (
+            f"Organization discovery failed ({error.message}); the platform "
+            f"default applies. Select one later with "
+            f"`{_org_switch_hint(resolved)}`."
+        )
+    if requested is not None:
+        organization = _match_org(
+            organizations, requested, resolved=resolved, as_json=as_json
+        )
+        oauth.set_organization(home, resolved.environment, organization)
+        return organization, None
+    if not organizations:
+        return None, None
+    if len(organizations) == 1:
+        oauth.set_organization(home, resolved.environment, organizations[0])
+        return organizations[0], None
+    organization = _prompt_org_choice(ports, organizations)
+    if organization is None:
+        return None, (
+            "Your account belongs to multiple organizations; none was "
+            "selected, so the platform default applies. Choose one with "
+            f"`{_org_switch_hint(resolved)}`."
+        )
+    oauth.set_organization(home, resolved.environment, organization)
+    return organization, None
+
+
+def _org_label(organization: dict) -> str:
+    name = organization.get("name") or organization["id"]
+    if name == organization["id"]:
+        return organization["id"]
+    return f"{name} ({organization['id']})"
+
+
+def _prompt_org_choice(ports: Ports, organizations: list[dict]) -> dict | None:
+    """The org menu, shaped like the login-method menu: arrow-key pointer
+    on a real terminal, a numbered typed prompt as the fallback. Without
+    an interactive stdin there is nobody to ask — return None and let the
+    caller leave the platform default in place."""
+    if not ports.stdin_is_tty():
+        return None
+    labels = [_org_label(organization) for organization in organizations]
+    if os.environ.get("TERM") != "dumb":
+        typer.echo(
+            "Which organization should this login act in? (↑/↓ and Enter)",
+            err=True,
+        )
+        try:
+            index = term.select(labels, getchar=ports.getchar)
+            return organizations[index]
+        except term.Unsupported:
+            pass  # the widget erased itself; the typed fallback re-lists
+    else:
+        typer.echo("Which organization should this login act in?", err=True)
+    for number, label in enumerate(labels, start=1):
+        typer.echo(f"  {number}) {label}", err=True)
+    while True:
+        choice = typer.prompt("Organization", default="1", err=True).strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(organizations):
+            return organizations[int(choice) - 1]
+        typer.echo(f"Choose 1-{len(organizations)}.", err=True)
+
+
+def _match_org(
+    organizations: list[dict],
+    requested: str,
+    *,
+    resolved: ResolvedConfig,
+    as_json: bool,
+) -> dict:
+    """Resolve an id-or-name to one membership: exact id first, then a
+    unique case-insensitive name. Anything else exits listing what the
+    account can actually act in (the server would reject it anyway —
+    x-org-id is membership-verified per request)."""
+    for organization in organizations:
+        if organization["id"] == requested:
+            return organization
+    by_name = [
+        organization
+        for organization in organizations
+        if (organization.get("name") or "").casefold() == requested.casefold()
+    ]
+    if len(by_name) == 1:
+        return by_name[0]
+    listed = ", ".join(_org_label(o) for o in organizations) or "none"
+    reason = "org_ambiguous" if len(by_name) > 1 else "org_not_found"
+    detail = (
+        f"{requested!r} names more than one organization — pass its id"
+        if len(by_name) > 1
+        else f"no organization of yours matches {requested!r}"
+    )
+    exit_with(
+        {
+            "error": reason,
+            "requested": requested,
+            "organizations": organizations,
+            "environment": resolved.environment,
+        },
+        f"Cannot select an organization: {detail}. Your organizations: "
+        f"{listed}.",
+        as_json=as_json,
+        code=EXIT_FAILED,
+    )
+
+
+def _ensure_org_on_existing(
+    ports: Ports,
+    home,
+    resolved: ResolvedConfig,
+    existing: credentials.ActiveCredential,
+    requested: str,
+    *,
+    as_json: bool,
+) -> None:
+    """`login --org X` against a target that is already logged in: the
+    guarantee extends to the organization, so an OAuth session switches
+    without a browser round-trip (the refresh token is org-agnostic)."""
+    if existing.method != "oauth" or existing.oauth is None:
+        exit_with(
+            {
+                "error": "org_with_api_key",
+                "message": "--org applies to browser (OAuth) logins; the "
+                "stored credential is an API key, which is already "
+                "organization-bound.",
+            },
+            "--org applies to browser (OAuth) logins; the stored credential "
+            "is an API key, which is already organization-bound. Log out "
+            "first to switch methods.",
+            as_json=as_json,
+            code=EXIT_USAGE,
+        )
+    try:
+        organizations = oauth.fetch_organizations(home, resolved.environment, ports)
+    except oauth.OrgDiscoveryError as error:
+        exit_with(
+            {"error": f"org_{error.reason}", "message": error.message},
+            f"Selecting an organization failed: {error.message}.",
+            as_json=as_json,
+            code=EXIT_FAILED,
+        )
+    organization = _match_org(
+        organizations, requested, resolved=resolved, as_json=as_json
+    )
+    oauth.set_organization(home, resolved.environment, organization)
+    identity = existing.oauth.get("identity") or {}
+    who = identity.get("email") or identity.get("sub") or "unknown identity"
+    emit(
+        {
+            "method": "oauth",
+            "already_authenticated": True,
+            "organization": organization,
+            "stored": True,
+            "environment": resolved.environment,
+            "endpoint": resolved.endpoint,
+            "endpoint_source": resolved.endpoint_source,
+        },
+        f"Already authenticated for the {resolved.environment} environment "
+        f"as {who}; organization set to {_org_label(organization)}.",
+        as_json=as_json,
+    )
 
 
 def _run_browser_flow(
@@ -429,26 +680,40 @@ def _run_browser_flow(
 
 
 def _emit_browser_login(
-    home, resolved: ResolvedConfig, entry: dict, *, as_json: bool
+    home,
+    resolved: ResolvedConfig,
+    entry: dict,
+    *,
+    organization: dict | None = None,
+    note: str | None = None,
+    as_json: bool,
 ) -> None:
     identity = entry.get("identity") or {}
     who = identity.get("email") or identity.get("sub") or "unknown identity"
-    emit(
-        {
-            "method": "oauth",
-            "identity": identity,
-            "credential": credentials.mask(entry["access_token"]),
-            "stored": True,
-            "environment": resolved.environment,
-            "endpoint": resolved.endpoint,
-            "endpoint_source": resolved.endpoint_source,
-        },
+    human = (
         f"Logged in as {who} via browser (tokens stored in "
         f"{credentials.credentials_path(home)} for the "
         f"{resolved.environment} environment).\n"
-        f"Endpoint: {resolved.endpoint} ({resolved.endpoint_source})",
-        as_json=as_json,
+        f"Endpoint: {resolved.endpoint} ({resolved.endpoint_source})"
     )
+    if organization is not None:
+        human = f"{human}\nOrganization: {_org_label(organization)}"
+    if note is not None:
+        human = f"{human}\n{note}"
+    payload = {
+        "method": "oauth",
+        "identity": identity,
+        "credential": credentials.mask(entry["access_token"]),
+        "organization": organization,
+        "stored": True,
+        "environment": resolved.environment,
+        "endpoint": resolved.endpoint,
+        "endpoint_source": resolved.endpoint_source,
+    }
+    if note is not None:
+        # Agents read the JSON, so the remediation must live in it too.
+        payload["organization_note"] = note
+    emit(payload, human, as_json=as_json)
 
 
 def _expiry_note(oauth_entry: dict, ports: Ports) -> tuple[float | None, str]:
@@ -517,18 +782,26 @@ def status(
         identity = active.oauth.get("identity") or {}
         remaining, note = _expiry_note(active.oauth, ports)
         refresh = "available" if active.oauth.get("refresh_token") else "unavailable"
+        organization = active.oauth.get("organization")
         payload.update(
             {
                 "identity": identity,
                 "expires_at": active.oauth.get("expires_at"),
                 "expires_in_seconds": max(0, int(remaining)) if remaining is not None else None,
                 "refresh_token": refresh == "available",
+                "organization": organization,
             }
+        )
+        org_note = (
+            _org_label(organization)
+            if organization
+            else "platform default (none selected)"
         )
         who = identity.get("email") or identity.get("sub") or "unknown identity"
         human = (
             f"Authenticated via OAuth as {who} ({source_note}).\n"
             f"Access token {active.masked} {note}; refresh token {refresh}.\n"
+            f"Organization: {org_note}\n"
             f"{tail}"
         )
     else:
@@ -605,6 +878,151 @@ def logout(
     cleared = credentials.clear_environment(home, target)
     _emit_logout(
         cleared, revoked, scope="environment", environment=target, as_json=as_json
+    )
+
+
+org_app = typer.Typer(
+    name="org",
+    no_args_is_help=True,
+    help="Show or switch the organization an OAuth login acts in.",
+)
+auth_app.add_typer(org_app)
+
+
+def _require_oauth_session(home, resolved: ResolvedConfig, *, as_json: bool) -> dict:
+    """Org commands manage the *stored* OAuth session (ADE_API_KEY plays
+    no part): exit with remediation when the target has none."""
+    stored = credentials.stored_credential(home, resolved.environment)
+    if stored is None:
+        exit_with(
+            {
+                "error": "unauthenticated",
+                "environment": resolved.environment,
+                "message": f"Run `{resolved.login_hint}` first.",
+            },
+            f"Not authenticated for {resolved.endpoint_label}. Run "
+            f"`{resolved.login_hint}` first.",
+            as_json=as_json,
+            code=EXIT_FAILED,
+        )
+    if stored.method != "oauth" or stored.oauth is None:
+        exit_with(
+            {
+                "error": "org_requires_oauth",
+                "environment": resolved.environment,
+                "message": "Organization selection applies to browser "
+                "(OAuth) logins; API keys are already organization-bound.",
+            },
+            "Organization selection applies to browser (OAuth) logins; the "
+            f"stored credential for {resolved.environment} is an API key, "
+            "which is already organization-bound. Log in with the browser "
+            f"method first (`{resolved.login_hint}`).",
+            as_json=as_json,
+            code=EXIT_FAILED,
+        )
+    return stored.oauth
+
+
+def _fetch_orgs_or_exit(
+    ports: Ports, home, resolved: ResolvedConfig, *, as_json: bool
+) -> list[dict]:
+    try:
+        return oauth.fetch_organizations(home, resolved.environment, ports)
+    except oauth.OrgDiscoveryError as error:
+        exit_with(
+            {
+                "error": f"org_{error.reason}",
+                "environment": resolved.environment,
+                "message": error.message,
+            },
+            f"Could not list your organizations: {error.message}.",
+            as_json=as_json,
+            code=EXIT_FAILED,
+        )
+
+
+@org_app.command("list")
+def org_list(
+    ctx: typer.Context,
+    environment: str | None = typer.Option(None, "--env", help=_ENV_HELP),
+    as_json: bool = JSON_FLAG,
+) -> None:
+    """List the organizations the target's OAuth session can act in,
+    marking the selected one. Memberships come live from the login
+    provider, so a fresh grant or removal shows immediately."""
+    home = ade_home()
+    ports: Ports = ctx.obj
+    resolved = resolve_target(home, environment, as_json=as_json)
+    entry = _require_oauth_session(home, resolved, as_json=as_json)
+    organizations = _fetch_orgs_or_exit(ports, home, resolved, as_json=as_json)
+    selected_id = ((entry.get("organization") or {}).get("id")) or None
+    rows = [
+        {**organization, "selected": organization["id"] == selected_id}
+        for organization in organizations
+    ]
+    if not rows:
+        human = (
+            "Your account belongs to no organizations; requests use the "
+            "platform default."
+        )
+    else:
+        lines = [
+            f"{'*' if row['selected'] else ' '} {_org_label(row)}" for row in rows
+        ]
+        human = "\n".join(lines)
+        if selected_id is None:
+            human = (
+                f"{human}\nNo organization selected; the platform default "
+                f"applies. Select one with `{_org_switch_hint(resolved)}`."
+            )
+    emit(
+        {
+            "environment": resolved.environment,
+            "organizations": rows,
+            "selected": selected_id,
+        },
+        human,
+        as_json=as_json,
+    )
+
+
+@org_app.command("switch")
+def org_switch(
+    ctx: typer.Context,
+    org: str = typer.Argument(..., help="Organization id or name."),
+    environment: str | None = typer.Option(None, "--env", help=_ENV_HELP),
+    as_json: bool = JSON_FLAG,
+) -> None:
+    """Switch which organization the target's OAuth session acts in.
+    Validated against your live memberships here, and membership-verified
+    by the platform on every request regardless."""
+    home = ade_home()
+    ports: Ports = ctx.obj
+    resolved = resolve_target(home, environment, as_json=as_json)
+    entry = _require_oauth_session(home, resolved, as_json=as_json)
+    previous = entry.get("organization") or None
+    organizations = _fetch_orgs_or_exit(ports, home, resolved, as_json=as_json)
+    organization = _match_org(organizations, org, resolved=resolved, as_json=as_json)
+    oauth.set_organization(home, resolved.environment, organization)
+    if previous and previous.get("id") == organization["id"]:
+        human = (
+            f"Already acting in {_org_label(organization)} for the "
+            f"{resolved.environment} environment; nothing to do."
+        )
+    else:
+        human = (
+            f"Now acting in {_org_label(organization)} for the "
+            f"{resolved.environment} environment."
+        )
+    emit(
+        {
+            "environment": resolved.environment,
+            "organization": organization,
+            "previous": previous,
+            "stored": True,
+        },
+        human,
+        as_json=as_json,
     )
 
 

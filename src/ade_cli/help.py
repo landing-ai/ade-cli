@@ -49,6 +49,8 @@ BANDS: list[tuple[str, list[str]]] = [
             "auth login",
             "auth status",
             "auth logout",
+            "auth org list",
+            "auth org switch",
             "login",
             "logout",
             "version",
@@ -138,6 +140,13 @@ TOPICS: list[dict] = [
             "",
             "`ade auth status --json` reports the resolved target, how it is",
             "authenticated, and every other environment holding a credential.",
+            "",
+            "Browser (OAuth) logins act in one Logto organization: a single",
+            "membership selects itself; several prompt at login (or take",
+            "--org). `ade auth org list` shows the memberships live, and",
+            "`ade auth org switch <org>` changes the selection without a",
+            "re-login. No selection means the platform default applies. API",
+            "keys are already organization-bound — none of this applies.",
         ],
     },
     {
@@ -307,6 +316,8 @@ RESULTS: dict[str, dict] = {
             ("endpoint", "its endpoint"),
             ("endpoint_source", "default | config | env"),
             ("identity", "OAuth logins: the token's identity claims"),
+            ("organization", "OAuth logins: the selected organization "
+             "({id, name}; null when the platform default applies)"),
         ],
     },
     "auth status": {
@@ -318,7 +329,27 @@ RESULTS: dict[str, dict] = {
             ("source", "env (ADE_API_KEY) | stored"),
             ("environment / endpoint / endpoint_source", "the resolved target"),
             ("other_environments", "every other environment holding a credential"),
-            ("expires_at / expires_in_seconds / refresh_token", "OAuth only"),
+            ("expires_at / expires_in_seconds / refresh_token / organization",
+             "OAuth only"),
+        ],
+    },
+    "auth org list": {
+        "shape": "object",
+        "keys": [
+            ("organizations", "your memberships, live from the login "
+             "provider: [{id, name, selected}]"),
+            ("selected", "the selected organization id (null when the "
+             "platform default applies)"),
+            ("environment", "the resolved target"),
+        ],
+    },
+    "auth org switch": {
+        "shape": "object",
+        "keys": [
+            ("organization", "the selection now stored ({id, name})"),
+            ("previous", "the selection it replaced (null if none)"),
+            ("stored", "always true on success"),
+            ("environment", "the resolved target"),
         ],
     },
     "auth logout": {

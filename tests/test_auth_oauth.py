@@ -63,6 +63,7 @@ def seed_stored_oauth(
     access: str = "at-old",
     refresh: str | None = "rt-old",
     expires_at: float = 1_750_000_000.0 + 3600,  # FakeClock start + 1h
+    organization: dict | None = None,
 ) -> None:
     cli.home.mkdir(parents=True, exist_ok=True)
     entry = {
@@ -71,9 +72,40 @@ def seed_stored_oauth(
         "expires_at": expires_at,
         "identity": {"sub": "user-1", "email": "zhichao.lin@landing.ai"},
     }
+    if organization is not None:
+        entry["organization"] = organization
     (cli.home / "credentials.json").write_text(
         json.dumps({"environments": {environment: {"method": "oauth", "oauth": entry}}})
     )
+
+
+ORG_A = {"id": "org-a", "name": "Acme"}
+ORG_B = {"id": "org-b", "name": "Beta"}
+
+
+def userinfo_response(orgs: list[dict]) -> dict:
+    """Userinfo claims carrying the organization memberships (ADR-0009)."""
+    return {
+        "sub": "user-1",
+        "email": "zhichao.lin@landing.ai",
+        "organizations": [org["id"] for org in orgs],
+        "organization_data": [
+            {"id": org["id"], "name": org["name"], "description": ""} for org in orgs
+        ],
+    }
+
+
+def script_discovery(
+    cli, orgs: list[dict] | None = None, refresh: str = "rt-2"
+) -> None:
+    """The two requests behind org discovery (ADR-0009): a resource-less
+    refresh minting a userinfo-capable token, then userinfo itself. The
+    default single membership makes the pick automatic — the shape most
+    existing login tests want."""
+    cli.transport.respond(
+        200, token_response(access="opaque-1", refresh=refresh)
+    )
+    cli.transport.respond(200, userinfo_response([ORG_A] if orgs is None else orgs))
 
 
 class ClickAllow:
@@ -108,6 +140,7 @@ def test_login_pkce_flow_stores_tokens_0600(cli):
     seed_oauth_config(cli)
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke("auth", "login", browser=browser)
 
@@ -120,30 +153,46 @@ def test_login_pkce_flow_stores_tokens_0600(cli):
     assert q["code_challenge_method"] == "S256"
     assert q["resource"] == "https://api.ade.landing.ai"
     assert "offline_access" in q["scope"]
+    assert "urn:logto:scope:organizations" in q["scope"]
     assert q["prompt"] == "consent"
     assert q["redirect_uri"].startswith("http://127.0.0.1:")
     # The exchange went to the issuer's token endpoint with the matching
     # verifier: S256(code_verifier) must equal the challenge sent above.
-    (exchange,) = cli.transport.requests
+    exchange = cli.transport.requests[0]
     assert str(exchange.url) == "https://login.landing.ai/oidc/token"
     form = {k: v[0] for k, v in parse_qs(exchange.content.decode()).items()}
     assert form["grant_type"] == "authorization_code"
     assert form["code"] == "code-1"
     challenge = _b64url(hashlib.sha256(form["code_verifier"].encode()).digest())
     assert challenge == q["code_challenge"]
-    # Tokens stored per environment, file locked down.
+    # Org discovery followed (ADR-0009): a resource-less refresh (the
+    # userinfo-capable token), then userinfo itself.
+    discovery = cli.transport.requests[1]
+    discovery_form = {
+        k: v[0] for k, v in parse_qs(discovery.content.decode()).items()
+    }
+    assert discovery_form["grant_type"] == "refresh_token"
+    assert "resource" not in discovery_form
+    userinfo = cli.transport.requests[2]
+    assert str(userinfo.url) == "https://login.landing.ai/oidc/me"
+    assert userinfo.headers["Authorization"] == "Bearer opaque-1"
+    # Tokens stored per environment, file locked down. The discovery
+    # refresh rotated the refresh token; the API access token is intact.
     creds = cli.home / "credentials.json"
     assert stat.S_IMODE(creds.stat().st_mode) == 0o600
     entry = stored_environments(cli)["production"]
     assert entry["method"] == "oauth"
     assert entry["oauth"]["access_token"] == "at-1"
-    assert entry["oauth"]["refresh_token"] == "rt-1"
+    assert entry["oauth"]["refresh_token"] == "rt-2"
     assert entry["oauth"]["identity"]["email"] == "zhichao.lin@landing.ai"
+    # The single membership selected itself.
+    assert entry["oauth"]["organization"] == ORG_A
 
 
 def test_login_json_reports_identity_without_leaking_tokens(cli):
     seed_oauth_config(cli)
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke("auth", "login", "--json", browser=ClickAllow())
 
@@ -151,13 +200,16 @@ def test_login_json_reports_identity_without_leaking_tokens(cli):
     payload = json.loads(result.stdout)
     assert payload["method"] == "oauth"
     assert payload["identity"]["email"] == "zhichao.lin@landing.ai"
+    assert payload["organization"] == ORG_A
     assert "at-1" not in result.stdout
+    assert "opaque-1" not in result.stdout
 
 
 def test_login_targets_the_env_flag(cli):
     seed_oauth_config(cli, environment="dev")
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke("auth", "login", "--env", "dev", browser=browser)
 
@@ -196,6 +248,7 @@ def test_flagless_browser_login_targets_production_despite_stale_config_keys(cli
     )
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke("auth", "login", "--json", browser=browser)
 
@@ -214,14 +267,17 @@ def test_login_config_overrides_issuer_and_resource(cli):
     )
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke("auth", "login", browser=browser)
 
     assert result.exit_code == 0
     assert browser.url.startswith("https://login.example.test/oidc/auth?")
     assert browser.query()["resource"] == "https://api.example.test"
-    (exchange,) = cli.transport.requests
+    exchange = cli.transport.requests[0]
     assert str(exchange.url) == "https://login.example.test/oidc/token"
+    # Discovery derives its endpoints from the same overridden issuer.
+    assert str(cli.transport.requests[2].url) == "https://login.example.test/oidc/me"
 
 
 def test_login_denied_errors_cleanly_without_tokens(cli):
@@ -254,6 +310,7 @@ def test_forged_state_is_ignored_and_never_exchanged(cli):
 def test_stray_probe_does_not_kill_the_login(cli):
     seed_oauth_config(cli)
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     class ProbeThenAllow(ClickAllow):
         def __call__(self, url: str) -> bool:
@@ -288,6 +345,7 @@ class ClickAllowReadingPage(ClickAllow):
 def test_callback_page_is_the_branded_success_landing(cli):
     seed_oauth_config(cli)
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
     browser = ClickAllowReadingPage()
 
     result = cli.invoke("auth", "login", browser=browser)
@@ -344,6 +402,7 @@ def test_arrow_menu_down_enter_picks_the_browser(cli):
     cli.stdin_tty = True
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke(
         "auth", "login", "--json",
@@ -369,6 +428,7 @@ def test_menu_browser_choice_ignores_a_stale_stored_endpoint(cli):
     cli.stdin_tty = True
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke(
         "auth", "login", "--json",
@@ -406,6 +466,7 @@ def test_tty_menu_choice_2_runs_the_browser_flow(cli):
     cli.stdin_tty = True
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke(
         "auth", "login", "--json", input="2\n", browser=browser,
@@ -425,6 +486,7 @@ def test_non_tty_login_skips_the_menu_and_goes_to_browser(cli):
     # browser flow, exactly the pre-menu behavior.
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke("auth", "login", "--json", browser=browser)
 
@@ -495,6 +557,7 @@ def test_tty_menu_offers_browser_under_ade_endpoint_with_a_resource(cli):
     cli.stdin_tty = True
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke(
         "auth", "login", "--json",
@@ -523,6 +586,7 @@ BAKED_CLIENT_IDS = {
 def test_every_environment_logs_in_with_no_config_at_all(cli, environment):
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke("auth", "login", "--env", environment, browser=browser)
 
@@ -552,6 +616,7 @@ def test_config_client_id_overrides_the_baked_default(cli):
     seed_oauth_config(cli, environment="dev")  # seeds CLIENT_ID, not the baked id
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke("auth", "login", "--env", "dev", browser=browser)
 
@@ -607,6 +672,7 @@ def test_browser_login_under_ade_endpoint_with_resource_override_proceeds(cli):
     )
     browser = ClickAllow()
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
 
     result = cli.invoke(
         "auth", "login",
@@ -621,6 +687,7 @@ def test_browser_login_under_ade_endpoint_with_resource_override_proceeds(cli):
 def test_status_shows_oauth_identity_and_expiry(cli):
     seed_oauth_config(cli)
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
     cli.invoke("auth", "login", browser=ClickAllow())
 
     result = cli.invoke("auth", "status", "--json")
@@ -637,6 +704,7 @@ def test_status_shows_oauth_identity_and_expiry(cli):
 def test_status_human_output_names_the_identity(cli):
     seed_oauth_config(cli)
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
     cli.invoke("auth", "login", browser=ClickAllow())
 
     result = cli.invoke("auth", "status")
@@ -644,6 +712,7 @@ def test_status_human_output_names_the_identity(cli):
     assert result.exit_code == 0
     assert "zhichao.lin@landing.ai" in result.stdout
     assert "expires" in result.stdout
+    assert "Acme (org-a)" in result.stdout
 
 
 def test_env_api_key_still_wins_over_stored_oauth(cli):
@@ -659,6 +728,7 @@ def test_env_api_key_still_wins_over_stored_oauth(cli):
 def test_most_recent_login_wins_api_key_after_oauth(cli):
     seed_oauth_config(cli)
     cli.transport.respond(200, token_response())
+    script_discovery(cli)
     cli.invoke("auth", "login", browser=ClickAllow())
 
     cli.transport.respond(200, {"accepted": 0})  # the verification probe (#117)
@@ -789,3 +859,241 @@ def test_api_key_requests_never_touch_the_token_endpoint(cli, tmp_path):
     assert result.exit_code == 0, result.output
     _probe, submit, poll = cli.transport.requests
     assert submit.headers["Authorization"] == f"Bearer {KEY}"
+
+
+# --- Organization selection (ADR-0009): discovery, the pick, x-org-id ---
+
+
+def test_login_multiple_orgs_prompts_with_arrows(cli):
+    seed_oauth_config(cli)
+    cli.stderr_tty = True
+    cli.stdin_tty = True
+    cli.transport.respond(200, token_response())
+    script_discovery(cli, orgs=[ORG_A, ORG_B])
+
+    result = cli.invoke(
+        "auth", "login", "--json",
+        # Method menu: down + Enter picks the browser; org menu: down +
+        # Enter picks the second membership.
+        keys=["\x1b[B", "\r", "\x1b[B", "\r"],
+        env={"TERM": "xterm-256color"},
+        browser=ClickAllow(),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Which organization" in result.stderr
+    assert json.loads(result.stdout)["organization"] == ORG_B
+    entry = stored_environments(cli)["production"]
+    assert entry["oauth"]["organization"] == ORG_B
+
+
+def test_login_multiple_orgs_non_interactive_defers_to_platform_default(cli):
+    seed_oauth_config(cli)
+    cli.transport.respond(200, token_response())
+    script_discovery(cli, orgs=[ORG_A, ORG_B])
+
+    result = cli.invoke("auth", "login", "--json", browser=ClickAllow())
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["organization"] is None
+    assert "organization" not in stored_environments(cli)["production"]["oauth"]
+    # The remediation names the switch command, in the payload agents read.
+    assert "ade auth org switch" in payload["organization_note"]
+
+
+def test_login_org_flag_picks_by_name_without_a_prompt(cli):
+    seed_oauth_config(cli)
+    cli.transport.respond(200, token_response())
+    script_discovery(cli, orgs=[ORG_A, ORG_B])
+
+    result = cli.invoke(
+        "auth", "login", "--org", "beta", "--json", browser=ClickAllow()
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["organization"] == ORG_B
+    entry = stored_environments(cli)["production"]
+    assert entry["oauth"]["organization"] == ORG_B
+
+
+def test_login_org_flag_unknown_fails_but_keeps_the_login(cli):
+    seed_oauth_config(cli)
+    cli.transport.respond(200, token_response())
+    script_discovery(cli, orgs=[ORG_A, ORG_B])
+
+    result = cli.invoke(
+        "auth", "login", "--org", "nope", "--json", browser=ClickAllow()
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "org_not_found"
+    # The listing names what the account can act in.
+    assert any(org["id"] == "org-a" for org in payload["organizations"])
+    # The login itself survived: tokens stored, no selection.
+    entry = stored_environments(cli)["production"]
+    assert entry["oauth"]["access_token"] == "at-1"
+    assert "organization" not in entry["oauth"]
+
+
+def test_login_org_flag_with_api_key_is_a_usage_error(cli):
+    result = cli.invoke(
+        "auth", "login", "--api-key", KEY, "--org", "org-a", "--json"
+    )
+
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error"] == "org_with_api_key"
+    assert cli.transport.requests == []
+
+
+def test_login_org_flag_switches_an_existing_session_without_a_browser(cli):
+    seed_oauth_config(cli)
+    seed_stored_oauth(cli, organization=ORG_A)
+    script_discovery(cli, orgs=[ORG_A, ORG_B])
+    browser = ClickAllow()
+
+    result = cli.invoke(
+        "auth", "login", "--org", "org-b", "--json", browser=browser
+    )
+
+    assert result.exit_code == 0, result.output
+    assert browser.url is None  # ensure semantics: no browser round-trip
+    payload = json.loads(result.stdout)
+    assert payload["already_authenticated"] is True
+    assert payload["organization"] == ORG_B
+    entry = stored_environments(cli)["production"]
+    assert entry["oauth"]["organization"] == ORG_B
+    # The discovery refresh rotated the refresh token; persisted.
+    assert entry["oauth"]["refresh_token"] == "rt-2"
+    assert entry["oauth"]["access_token"] == "at-old"  # API token untouched
+
+
+def test_login_session_predating_the_org_scope_notes_relogin(cli):
+    # Userinfo omits the organizations claim entirely when the refresh
+    # token was granted before the scope existed — the login still lands.
+    seed_oauth_config(cli)
+    cli.transport.respond(200, token_response())
+    cli.transport.respond(200, token_response(access="opaque-1", refresh="rt-2"))
+    cli.transport.respond(200, {"sub": "user-1", "email": "zhichao.lin@landing.ai"})
+
+    result = cli.invoke("auth", "login", "--json", browser=ClickAllow())
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["organization"] is None
+    assert stored_environments(cli)["production"]["oauth"]["access_token"] == "at-1"
+
+
+def test_org_list_marks_the_selected_membership(cli):
+    seed_oauth_config(cli)
+    seed_stored_oauth(cli, organization=ORG_B)
+    script_discovery(cli, orgs=[ORG_A, ORG_B])
+
+    result = cli.invoke("auth", "org", "list", "--json")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["selected"] == "org-b"
+    assert payload["organizations"] == [
+        {"id": "org-a", "name": "Acme", "selected": False},
+        {"id": "org-b", "name": "Beta", "selected": True},
+    ]
+
+
+def test_org_switch_updates_the_stored_selection(cli):
+    seed_oauth_config(cli)
+    seed_stored_oauth(cli, organization=ORG_A)
+    script_discovery(cli, orgs=[ORG_A, ORG_B])
+
+    result = cli.invoke("auth", "org", "switch", "Beta", "--json")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["organization"] == ORG_B
+    assert payload["previous"] == ORG_A
+    entry = stored_environments(cli)["production"]
+    assert entry["oauth"]["organization"] == ORG_B
+
+
+def test_org_switch_unknown_lists_the_memberships(cli):
+    seed_oauth_config(cli)
+    seed_stored_oauth(cli)
+    script_discovery(cli, orgs=[ORG_A])
+
+    result = cli.invoke("auth", "org", "switch", "org-x", "--json")
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "org_not_found"
+    assert "organization" not in stored_environments(cli)["production"]["oauth"]
+
+
+def test_org_commands_require_an_oauth_session(cli):
+    cli.transport.respond(200, {"accepted": 0})  # the verification probe (#117)
+    cli.invoke("auth", "login", "--api-key", KEY)
+
+    result = cli.invoke("auth", "org", "list", "--json")
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error"] == "org_requires_oauth"
+
+
+def test_org_list_unauthenticated_points_at_login(cli):
+    result = cli.invoke("auth", "org", "list", "--json")
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error"] == "unauthenticated"
+
+
+def test_parse_sends_the_selected_org_header(cli, tmp_path):
+    seed_stored_oauth(cli, organization=ORG_A)
+    cli.transport.respond(202, {"job_id": "job-0001", "status": "pending"})
+    cli.transport.respond(200, completed_job())
+
+    result = cli.invoke(*_parse_args(tmp_path))
+
+    assert result.exit_code == 0, result.output
+    submit, poll = cli.transport.requests
+    assert submit.headers["x-org-id"] == "org-a"
+    assert poll.headers["x-org-id"] == "org-a"
+
+
+def test_parse_without_a_selection_sends_no_org_header(cli, tmp_path):
+    seed_stored_oauth(cli)
+    cli.transport.respond(202, {"job_id": "job-0001", "status": "pending"})
+    cli.transport.respond(200, completed_job())
+
+    result = cli.invoke(*_parse_args(tmp_path))
+
+    assert result.exit_code == 0, result.output
+    submit, _poll = cli.transport.requests
+    assert "x-org-id" not in submit.headers
+
+
+def test_api_key_requests_send_no_org_header(cli, tmp_path):
+    cli.transport.respond(200, {"accepted": 0})  # the verification probe (#117)
+    cli.invoke("auth", "login", "--api-key", KEY)
+    cli.transport.respond(202, {"job_id": "job-0001", "status": "pending"})
+    cli.transport.respond(200, completed_job())
+
+    result = cli.invoke(*_parse_args(tmp_path))
+
+    assert result.exit_code == 0, result.output
+    assert "x-org-id" not in cli.transport.requests[1].headers
+
+
+def test_refresh_preserves_the_org_selection(cli, tmp_path):
+    seed_oauth_config(cli)
+    seed_stored_oauth(cli, organization=ORG_A, expires_at=1_750_000_000.0 - 10)
+    cli.transport.respond(200, token_response(access="at-2", refresh="rt-2"))
+    cli.transport.respond(202, {"job_id": "job-0001", "status": "pending"})
+    cli.transport.respond(200, completed_job())
+
+    result = cli.invoke(*_parse_args(tmp_path))
+
+    assert result.exit_code == 0, result.output
+    _refresh, submit, _poll = cli.transport.requests
+    assert submit.headers["Authorization"] == "Bearer at-2"
+    assert submit.headers["x-org-id"] == "org-a"
+    entry = stored_environments(cli)["production"]
+    assert entry["oauth"]["organization"] == ORG_A

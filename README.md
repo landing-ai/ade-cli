@@ -69,7 +69,10 @@ stderr; set `ADE_NO_UPDATE_CHECK=1` to turn that off.
 | `ade auth login --api-key -` | prompt for the key (hidden input) |
 | `echo $KEY \| ade auth login` | headless: a piped key is the prompt, answered |
 | `ade auth login --env eu` | log in to the EU region (no-op if it already holds a credential) |
+| `ade auth login --org acme` | browser sign-in acting in a specific organization (id or name) |
 | `ade auth status` | the resolved target + every other environment holding a credential |
+| `ade auth org list` | your organizations, live, marking the selected one |
+| `ade auth org switch acme` | act in a different organization — no re-login needed |
 | `ade auth logout` | log out of the resolved target |
 | `ade auth logout --env eu` | log out of a specific environment |
 | `ade auth logout --all` | log out of every environment |
@@ -81,6 +84,12 @@ stores refreshable tokens; nothing to copy. API keys come from your
 [LandingAI account settings](https://ade.landing.ai/settings/api-key).
 `login` verifies the key against the target environment before storing
 it — a mistyped key fails right at login, not at your first `parse`.
+
+If your account belongs to one organization, browser sign-in selects it
+automatically; if it belongs to several, the login asks (or takes
+`--org`), and `ade auth org switch` changes it any time without a
+browser round-trip. API keys belong to an organization already, so none
+of this applies to them.
 
 **There is no "current environment" — the target is resolved fresh on every
 command**: the `--env` flag, else the `ADE_ENV` variable, else `production`.

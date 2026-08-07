@@ -109,8 +109,12 @@ _Avoid_: validation against a dedicated auth route (none exists in the v2 contra
 The per-environment Logto coordinates the browser login runs against: issuer (`login.*`, never the `logto.*` admin portal), client id, and the RFC 8707 resource indicator (the token audience — the environment's API endpoint). Defaults are data; `config.json`'s `oauth.<environment>` block overrides field by field. Browser login is a public login method (ADR-0008; ADR-0004's launch gate is deleted now that the platform accepts OIDC tokens).
 
 **OAuth session**:
-The refreshable browser-login credential for one environment: access + refresh tokens, identity, expiry. Access tokens refresh silently near expiry or once after a 401; refresh tokens rotate on every use, so refresh holds a cross-process lock and re-reads before spending one.
+The refreshable browser-login credential for one environment: access + refresh tokens, identity, expiry, and the organization selection. Access tokens refresh silently near expiry or once after a 401; refresh tokens rotate on every use, so refresh holds a cross-process lock and re-reads before spending one.
 _Avoid_: token (alone — access and refresh tokens have different lifecycles)
+
+**Organization selection**:
+Which Logto organization an OAuth session acts in (ADR-0009), stored per environment on the session and sent as `x-org-id` on API requests — the platform verifies membership per request. Memberships are discovered from Logto's userinfo (one resource-less refresh mints the opaque token userinfo accepts); one membership selects itself, several prompt or take `--org`, and no selection means the platform's default organization applies. `auth org list` / `auth org switch` manage it without a browser round-trip. API keys carry no selection — they are already organization-bound.
+_Avoid_: "logged into an org" (the token is organization-blind; the header carries the choice)
 
 ### Store
 

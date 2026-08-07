@@ -38,6 +38,13 @@
           "help": "Log in with this API key directly ('-' prompts with hidden input)."
         },
         {
+          "flags": "--org",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Act in this Logto organization (id or name). Browser (OAuth) logins only \u2014 API keys are already organization-bound."
+        },
+        {
           "flags": "--env",
           "metavar": "TEXT",
           "required": false,
@@ -80,6 +87,10 @@
           {
             "key": "identity",
             "what": "OAuth logins: the token's identity claims"
+          },
+          {
+            "key": "organization",
+            "what": "OAuth logins: the selected organization ({id, name}; null when the platform default applies)"
           }
         ]
       },
@@ -128,7 +139,7 @@
             "what": "every other environment holding a credential"
           },
           {
-            "key": "expires_at / expires_in_seconds / refresh_token",
+            "key": "expires_at / expires_in_seconds / refresh_token / organization",
             "what": "OAuth only"
           }
         ]
@@ -185,6 +196,84 @@
       "band": "credentials & CLI lifecycle"
     },
     {
+      "name": "auth org list",
+      "usage": "ade auth org list [options] [--json]",
+      "summary": "List the organizations the target's OAuth session can act in,\nmarking the selected one. Memberships come live from the login\nprovider, so a fresh grant or removal shows immediately.",
+      "arguments": [],
+      "flags": [
+        {
+          "flags": "--env",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "organizations",
+            "what": "your memberships, live from the login provider: [{id, name, selected}]"
+          },
+          {
+            "key": "selected",
+            "what": "the selected organization id (null when the platform default applies)"
+          },
+          {
+            "key": "environment",
+            "what": "the resolved target"
+          }
+        ]
+      },
+      "band": "credentials & CLI lifecycle"
+    },
+    {
+      "name": "auth org switch",
+      "usage": "ade auth org switch ORG [options] [--json]",
+      "summary": "Switch which organization the target's OAuth session acts in.\nValidated against your live memberships here, and membership-verified\nby the platform on every request regardless.",
+      "arguments": [
+        {
+          "name": "ORG",
+          "required": true,
+          "help": "Organization id or name."
+        }
+      ],
+      "flags": [
+        {
+          "flags": "--env",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "organization",
+            "what": "the selection now stored ({id, name})"
+          },
+          {
+            "key": "previous",
+            "what": "the selection it replaced (null if none)"
+          },
+          {
+            "key": "stored",
+            "what": "always true on success"
+          },
+          {
+            "key": "environment",
+            "what": "the resolved target"
+          }
+        ]
+      },
+      "band": "credentials & CLI lifecycle"
+    },
+    {
       "name": "login",
       "usage": "ade login [options] [--json]",
       "summary": "Alias of `ade auth login`: ensure the target environment is logged in; --api-key authenticates with a key directly ('-' prompts with hidden input).",
@@ -196,6 +285,13 @@
           "required": false,
           "default": null,
           "help": "Log in with this API key directly ('-' prompts with hidden input)."
+        },
+        {
+          "flags": "--org",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Act in this Logto organization (id or name). Browser (OAuth) logins only \u2014 API keys are already organization-bound."
         },
         {
           "flags": "--env",
@@ -240,6 +336,10 @@
           {
             "key": "identity",
             "what": "OAuth logins: the token's identity claims"
+          },
+          {
+            "key": "organization",
+            "what": "OAuth logins: the selected organization ({id, name}; null when the platform default applies)"
           }
         ]
       },
@@ -1252,7 +1352,14 @@
         "  ade auth login --api-key $KEY    inline (visible to `ps`)",
         "",
         "`ade auth status --json` reports the resolved target, how it is",
-        "authenticated, and every other environment holding a credential."
+        "authenticated, and every other environment holding a credential.",
+        "",
+        "Browser (OAuth) logins act in one Logto organization: a single",
+        "membership selects itself; several prompt at login (or take",
+        "--org). `ade auth org list` shows the memberships live, and",
+        "`ade auth org switch <org>` changes the selection without a",
+        "re-login. No selection means the platform default applies. API",
+        "keys are already organization-bound \u2014 none of this applies."
       ]
     },
     {

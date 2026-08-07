@@ -137,6 +137,14 @@ def verify_credential(
         _check(client.post(TELEMETRY_PATH, json=[]), (200,))
 
 
+# The OAuth session's organization selection (ADR-0009). A user-scoped
+# bearer token is organization-blind, so the platform's authz reads this
+# header and verifies membership per request; without it, requests fall
+# to the account's platform-side default organization. API keys are
+# already organization-bound — callers pass no org and no header is sent.
+ORG_ID_HEADER = "x-org-id"
+
+
 class BearerAuth(Protocol):
     """Where the Authorization header comes from, request by request."""
 
@@ -168,6 +176,9 @@ class Gateway:
     # ``command/<name>`` token — the invoking command, so a parse job run
     # inside `extract -d` still says command/extract.
     command: str
+    # The selected organization id (OAuth sessions only; ADR-0009), sent
+    # as ORG_ID_HEADER on every request.
+    org_id: str | None = None
 
     def _send(
         self,
@@ -189,6 +200,7 @@ class Gateway:
                 # relays X-Source verbatim into the recorded row's source
                 # column, distinguishing CLI rows from raw-API ones.
                 "X-Source": "cli",
+                **({ORG_ID_HEADER: self.org_id} if self.org_id else {}),
             },
         ) as client:
             client.headers["Authorization"] = f"Bearer {self.auth.token()}"

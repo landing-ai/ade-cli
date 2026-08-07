@@ -219,6 +219,8 @@ def test_help_scopes_to_one_command(cli):
         "auth login",
         "auth status",
         "auth logout",
+        "auth org list",
+        "auth org switch",
     ]
 
 
