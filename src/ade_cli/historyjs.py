@@ -27,14 +27,66 @@ ARTIFACT = "history.js"
 BUILDING_MARKER = ".viewer.building"
 
 
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except PermissionError:
-        return True  # exists, owned by someone else — still a live claim
-    except (ProcessLookupError, ValueError, OverflowError):
-        return False
-    return True
+if os.name == "nt":  # pragma: no cover - exercised on Windows only
+
+    def _alive(pid: int) -> bool:
+        """Whether ``pid`` is a live process, probed via the Win32 API.
+
+        The POSIX idiom below (``os.kill(pid, 0)``) is doubly unusable
+        here (#171): on Windows ``os.kill`` calls TerminateProcess for
+        any signal other than the CTRL events — signal 0 included — so
+        probing a LIVE builder would kill it mid-build; and probing a
+        dead pid raises a bare OSError (WinError 87) rather than
+        ProcessLookupError, which crashed every view/history run that
+        saw a stale ``.viewer.building`` marker."""
+        import ctypes
+        from ctypes import wintypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        ERROR_ACCESS_DENIED = 5
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        # Explicit signatures: ctypes defaults restype to c_int, which
+        # truncates a pointer-sized HANDLE on 64-bit Windows — the probe
+        # would then misreport liveness and leak the real handle.
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = [
+            wintypes.DWORD, wintypes.BOOL, wintypes.DWORD,
+        ]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.GetExitCodeProcess.argtypes = [
+            wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        )
+        if not handle:
+            # Access denied means the pid exists (someone else's process)
+            # — a live claim; anything else (invalid parameter for a pid
+            # no process holds) means dead.
+            return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+        try:
+            code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True  # exists but unreadable — still a live claim
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+
+else:
+
+    def _alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except PermissionError:
+            return True  # exists, owned by someone else — still a live claim
+        # Bare OSError included (#171): "no such process" must never crash
+        # the scan on a platform that spells it differently than ESRCH.
+        except (ProcessLookupError, ValueError, OverflowError, OSError):
+            return False
+        return True
 
 
 def viewer_status(store: JobStore, item_id: str) -> str:
@@ -100,18 +152,11 @@ def write(store: JobStore, records: list[dict], *, now: float) -> Path:
     """Rewrite ``<store home>/history.js`` from already-scanned records.
 
     Items are emitted latest submission first — the sidebar renders the
-    file in order, and the newest run is the one the user just did.
-    ``history list`` keeps its own oldest-first order; timestamp-less
-    husks sort last either way.
+    file in order, and the newest run is the one the user just did
+    (``history list`` defaults to the same order; its ``--asc`` flag is
+    presentation-only and never reaches this file).
     """
-    ordered = sorted(
-        records,
-        key=lambda r: (
-            r["submitted_at"] is None,
-            -(r["submitted_at"] or 0.0),
-            r["job_item_id"],
-        ),
-    )
+    ordered = items.newest_first(records)
     payload = {
         "generated_at": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
         "items": [_sidebar_item(store, record) for record in ordered],

@@ -206,9 +206,10 @@ def item_record(store: JobStore, item_id: str) -> dict:
 
 
 def item_records(store: JobStore) -> list[dict]:
-    """All items' records in history order: oldest submission first (ties
-    and timestamp-less husks by id) — the flat answer to "what runs did I
-    do here". Re-scanned every call; zero HTTP."""
+    """All items' records, oldest submission first (ties and
+    timestamp-less husks by id) — the internal scan order; presentation
+    surfaces re-order via ``newest_first`` (the ``history list`` default
+    and the sidebar's order). Re-scanned every call; zero HTTP."""
     records = [item_record(store, item_id) for item_id in item_ids(store)]
     records.sort(
         key=lambda r: (
@@ -218,6 +219,20 @@ def item_records(store: JobStore) -> list[dict]:
         )
     )
     return records
+
+
+def newest_first(records: list[dict]) -> list[dict]:
+    """Records re-ordered latest submission first — what listings and the
+    sidebar show by default (the newest run is the one the user just
+    did); timestamp-less husks sort last either way."""
+    return sorted(
+        records,
+        key=lambda r: (
+            r["submitted_at"] is None,
+            -(r["submitted_at"] or 0.0),
+            r["job_item_id"],
+        ),
+    )
 
 
 def live_parse(store: JobStore, item_id: str) -> tuple[dict, dict] | None:

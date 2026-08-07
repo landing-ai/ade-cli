@@ -28,7 +28,7 @@ from pathlib import Path
 
 import typer
 
-from . import elements, items, store
+from . import attach, elements, items, store
 from .config import ade_home
 from .history import require_job_id, resolve_or_exit
 from .output import EXIT_FAILED, EXIT_USAGE, JSON_FLAG, emit, exit_with, tilde
@@ -52,8 +52,14 @@ def crop_element_to_file(
     failure. ``source_item_id`` names the parse item whose recorded source
     renders the imagery when it isn't ``item_id`` itself (a referencing
     extract item); the PNG still lands under ``item_id``'s ``crops/``."""
-    meta = jobs.read_json(source_item_id or item_id, "meta.json") or {}
-    image = crop_box(meta.get("source"), record["page"], record["box"], dpi=dpi)
+    owner = source_item_id or item_id
+    meta = jobs.read_json(owner, "meta.json") or {}
+    # URL parses render from their attached copy when one exists (#169);
+    # local parses keep the recorded source and its honest errors.
+    image = crop_box(
+        attach.renderable_source(jobs, owner, meta),
+        record["page"], record["box"], dpi=dpi,
+    )
     if output is None:
         output = jobs.item_dir(item_id) / "crops" / f"{record['id']}@{dpi}dpi.png"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -155,6 +161,7 @@ def find_element_or_exit(
 
 
 def crop(
+    ctx: typer.Context,
     job_id_token: str | None = typer.Argument(
         None, metavar="[JOB_ITEM_ID]", help="Job item id or unambiguous prefix."
     ),
@@ -187,6 +194,16 @@ def crop(
     dpi: int = typer.Option(DEFAULT_CROP_DPI, "--dpi", min=1, help="Render dpi."),
     open_image: bool = typer.Option(
         False, "--open", help="Open the crop (or the directory holding them)."
+    ),
+    download: bool | None = typer.Option(
+        None, "--download/--no-download",
+        help="URL-parsed items: fetch the document from its recorded URL "
+        "into the job item and crop from that copy — the parse itself "
+        "never gives the CLI the bytes (#169). This happens "
+        "automatically when no copy is attached yet (a notice and "
+        "progress line land on stderr); --no-download skips the fetch, "
+        "and the crop then fails honestly (a crop has no empty-imagery "
+        "fallback).",
     ),
     as_json: bool = JSON_FLAG,
 ) -> None:
@@ -228,9 +245,64 @@ def crop(
     selected = elements.select(
         records, element_type=element_type, page=page, element_ids=element_ids
     )
+    parse_meta = jobs.read_json(parse_item_id, "meta.json")
+    if download and not attach.is_url_source(parse_meta):
+        message = (
+            f"Job item {item_id} has no URL source to download: "
+            "--download applies to items parsed from --document-url "
+            "(local parses crop from their file directly)."
+        )
+        exit_with(
+            {
+                "error": "not_a_url_source",
+                "job_item_id": item_id,
+                "message": message,
+            },
+            message,
+            as_json=as_json,
+            code=EXIT_USAGE,
+        )
+    # A URL parse without an attached copy has nothing local to crop
+    # from, so the copy fetches now by default — announced on stderr,
+    # suppressible with --no-download (#169 follow-up, mirroring `view`).
+    # Unlike view there is no degraded render to fall back to (a crop is
+    # never served from missing imagery), so a failed fetch is the
+    # command's failure, exactly as the no-copy state already was.
+    downloaded = None
+    if (
+        download is not False
+        and selected
+        and attach.is_url_source(parse_meta)
+        and attach.attached_file(jobs, parse_item_id, parse_meta) is None
+    ):
+        try:
+            attach.download_with_notice(
+                jobs,
+                parse_item_id,
+                parse_meta or {},
+                ports=ctx.obj,
+                as_json=as_json,
+            )
+        except attach.AttachError as error:
+            exit_with(
+                {
+                    "error": error.kind,
+                    "job_item_id": parse_item_id,
+                    "message": error.message,
+                },
+                error.message,
+                as_json=as_json,
+                code=EXIT_FAILED,
+            )
+        downloaded = True
+        parse_meta = jobs.read_json(parse_item_id, "meta.json")
     # One drift check per invocation, not per element: the batch renders
     # from a single recorded source, and hashing it once is the whole cost.
-    drift = source_drift_note(jobs.read_json(parse_item_id, "meta.json"))
+    # URL items have no drift check (no recorded content hash); a render
+    # from their attached copy carries the unverified-bytes caveat instead.
+    drift = source_drift_note(parse_meta) or attach.caveat(
+        jobs, parse_item_id, parse_meta
+    )
     directory, single_file = _crop_target(
         jobs, item_id, output, dpi=dpi, batch=batch, as_json=as_json
     )
@@ -254,13 +326,26 @@ def crop(
             # Source-level failures (missing file, missing page) are the
             # whole batch's failure, not one element's: stopping is the
             # never-a-stale-image rule, and a partial batch that quietly
-            # skipped pages would read as a complete one.
+            # skipped pages would read as a complete one. URL items get
+            # the id-bearing fetch action instead of "restore the source"
+            # (#169 — there was never a local file to restore).
+            message = error.message
+            if "parsed from a URL" in message:
+                message += (
+                    " Re-run without --no-download to fetch the document, "
+                    f"or fetch it with `ade view {parse_item_id} "
+                    "--download` first."
+                )
+                tail = ""
+            else:
+                tail = (
+                    " (a crop is never served from stale imagery; restore "
+                    "the source and re-run)"
+                )
             exit_with(
                 {"error": error.kind, "job_item_id": item_id,
-                 "element_id": record["id"], "message": error.message},
-                f"Cannot crop {record['id']}: {error.message} (a crop is "
-                "never served from stale imagery; restore the source and "
-                "re-run).",
+                 "element_id": record["id"], "message": message},
+                f"Cannot crop {record['id']}: {message}{tail}.",
                 as_json=as_json,
                 code=EXIT_FAILED,
             )
@@ -289,6 +374,7 @@ def crop(
         "count": len(crops),
         "directory": str(landed),
         "crops": crops,
+        **({"downloaded": downloaded} if downloaded is not None else {}),
         **({"warning": drift} if drift else {}),
     }
     if not batch:

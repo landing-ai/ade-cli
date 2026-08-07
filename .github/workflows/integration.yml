@@ -1,0 +1,71 @@
+# Live integration suite (issue #175): drives the real CLI against
+# production — auth, parse, extract, then the local verbs (find, crop)
+# over what production returned — on macOS and Windows, the two
+# platforms customers install on. Three ways in:
+#   - every push to main (a merged PR that breaks production integration
+#     surfaces immediately, not at the next release),
+#   - the release pipeline calls it (workflow_call) and won't tag or
+#     build until it passes,
+#   - Actions -> Integration -> "Run workflow" for a manual check.
+# Never on pull_request: every run bills real parse + extract credits
+# (one of each per OS), and fork PRs must not reach the secret.
+# The tests live in tests/integration/ and skip themselves unless
+# ADE_INTEGRATION_API_KEY is set, so the offline suite stays hermetic.
+# Contract-tested by tests/test_release_pipeline.py.
+name: Integration
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      ADE_INTEGRATION_API_KEY:
+        description: Production ADE API key the suite authenticates with
+        required: true
+
+jobs:
+  integration:
+    # One matrix, two independent check rows ("Integration / macOS",
+    # "Integration / Windows"): fail-fast off so one platform's failure
+    # never cancels or masks the other's result.
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            runner: macos-latest
+          - platform: Windows
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      # workflow_call enforces the secret via `required: true`, but a
+      # direct workflow_dispatch does not: a missing secret expands to ""
+      # and the whole suite would skip itself — a green run that never
+      # touched production. Fail loudly instead.
+      - name: Require the production API key
+        shell: bash
+        env:
+          ADE_INTEGRATION_API_KEY: ${{ secrets.ADE_INTEGRATION_API_KEY }}
+        run: |
+          if [ -z "$ADE_INTEGRATION_API_KEY" ]; then
+            echo "::error::ADE_INTEGRATION_API_KEY secret is empty or unset — the suite would silently skip every test"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Sync dependencies
+        run: uv sync --locked
+
+      - name: Run integration suite against production
+        env:
+          ADE_INTEGRATION_API_KEY: ${{ secrets.ADE_INTEGRATION_API_KEY }}
+        run: uv run pytest tests/integration -v

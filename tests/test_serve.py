@@ -42,7 +42,7 @@ def test_serve_reuses_a_running_server(cli, parsed_url_item, monkeypatch):
         "ade_cli.view._spawn_server",
         lambda port: pytest.fail("a live server must be reused, not respawned"),
     )
-    payload = view_json(cli, item_id, "--serve")
+    payload = view_json(cli, item_id, "--serve", "--no-download")
     assert payload["url"] == f"http://127.0.0.1:8642/jobs/{item_id}/view.html"
     assert payload["serve_error"] is None
     probe = cli.transport.requests[-1]
@@ -64,7 +64,7 @@ def test_serve_spawns_the_daemon_and_waits_for_health(
         cli.transport.respond(200, _health_body(cli))
 
     monkeypatch.setattr("ade_cli.view._spawn_server", fake_spawn)
-    payload = view_json(cli, item_id, "--serve")
+    payload = view_json(cli, item_id, "--serve", "--no-download")
     assert spawned == [serve.DEFAULT_PORT]
     assert payload["url"] == f"http://127.0.0.1:8644/jobs/{item_id}/view.html"
     assert payload["deep_link"] is None
@@ -84,7 +84,7 @@ def test_serve_ignores_a_server_over_another_store(
         cli.transport.respond(200, _health_body(cli))
 
     monkeypatch.setattr("ade_cli.view._spawn_server", fake_spawn)
-    payload = view_json(cli, item_id, "--serve")
+    payload = view_json(cli, item_id, "--serve", "--no-download")
     assert payload["url"] == f"http://127.0.0.1:8645/jobs/{item_id}/view.html"
 
 
@@ -95,7 +95,8 @@ def test_serve_failure_degrades_to_file(cli, parsed_url_item, monkeypatch):
     monkeypatch.setattr("ade_cli.view._spawn_server", lambda port: None)
     opened = []
     result = cli.invoke(
-        "view", item_id, "--serve", "--open", "--no-sidebar-sync", "--json",
+        "view", item_id, "--serve", "--open", "--no-sidebar-sync", "--no-download",
+        "--json",
         browser=lambda url: opened.append(url) or True,
     )
     assert result.exit_code == 0, result.stdout
@@ -116,7 +117,7 @@ def test_serve_degrades_when_the_spawn_itself_fails(
         raise OSError("posix_spawn failed")
 
     monkeypatch.setattr("ade_cli.view._spawn_server", broken_spawn)
-    payload = view_json(cli, item_id, "--serve")
+    payload = view_json(cli, item_id, "--serve", "--no-download")
     assert payload["url"] is None
     assert "could not start the viewer server" in payload["serve_error"]
     assert payload["path"].endswith("view.html")
@@ -132,6 +133,7 @@ def test_serve_url_is_the_browser_target_with_deep_link(
     opened = []
     result = cli.invoke(
         "view", item_id, "--serve", "--open", "--element-id", "text-0",
+        "--no-download",
         "--no-sidebar-sync", "--json",
         browser=lambda url: opened.append(url) or True,
     )
@@ -147,7 +149,7 @@ def test_daemon_serves_artifacts_health_and_refuses_listings(cli, parsed_url_ite
     """The real handler on a real loopback socket: health names the store,
     artifacts stream, directory listings are refused (ADR-0005)."""
     item_id = parsed_url_item
-    view_json(cli, item_id)  # build the artifact the server will serve
+    view_json(cli, item_id, "--no-download")  # build what the server serves
     server = serve._bind(cli.home, 0)  # candidate 0 = OS-assigned, race-free
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)

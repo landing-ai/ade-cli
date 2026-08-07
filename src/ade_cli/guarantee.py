@@ -245,6 +245,15 @@ class Guarantee:
         mode = "off" if self.as_json else ("tty" if self.stderr_tty else "plain")
         self.progress = Progress(self.clock, mode)
 
+    def _item_label(self) -> str:
+        """The job item id as a human-line suffix (#167): every message
+        that names a run must also name the local key the next command
+        (view, extract, history clear, a resumed run) actually takes —
+        the --json payloads always carried it via ``context``, but the
+        human lines used to surface only the run id."""
+        item_id = self.context.get("job_item_id")
+        return f" (job item {item_id})" if item_id else ""
+
     def ensure(self) -> Outcome:
         """Run claim → submit → poll to a completed job with an inline
         result; every other outcome exits with its machine payload."""
@@ -254,8 +263,9 @@ class Guarantee:
             self.progress.close()
             if job_id:
                 human = (
-                    f"Run {job_id} continues server-side; re-run the "
-                    "same command to resume waiting (it will never resubmit)."
+                    f"Run {job_id}{self._item_label()} continues "
+                    "server-side; re-run the same command to resume "
+                    "waiting (it will never resubmit)."
                 )
             else:
                 human = self.interrupted_no_job_hint
@@ -361,7 +371,8 @@ class Guarantee:
                     reason = error.get("message") or error.get("code") or status
                     exit_with(
                         {"status": status, "run_id": job_id, **self.context, "reason": reason},
-                        f"{self.noun} {status}: {reason} (run {job_id}).",
+                        f"{self.noun} {status}: {reason} "
+                        f"(run {job_id}{self._item_label()}).",
                         as_json=self.as_json,
                         code=EXIT_FAILED,
                     )
@@ -374,7 +385,8 @@ class Guarantee:
                 self.progress.close()
                 exit_with(  # a status this CLI doesn't know is never silent success
                     {"error": "unexpected_status", "status": status, "run_id": job_id, **self.context},
-                    f"Unexpected run status {status!r} (run {job_id}); upgrade ade "
+                    f"Unexpected run status {status!r} "
+                    f"(run {job_id}{self._item_label()}); upgrade ade "
                     "(re-run the installer, or `uv tool upgrade ade-cli`) and retry.",
                     as_json=self.as_json,
                     code=EXIT_FAILED,
@@ -395,16 +407,17 @@ class Guarantee:
             output_url = payload.get("output_url")
             if output_url:
                 human = (
-                    f"Run {job_id} completed without an inline result; the "
-                    f"response carries output_url={output_url}, which "
-                    "ade does not fetch."
+                    f"Run {job_id}{self._item_label()} completed without "
+                    f"an inline result; the response carries "
+                    f"output_url={output_url}, which ade does not fetch."
                 )
             elif "data" in payload:
                 # The pre-cutover envelope: updating ade would not help —
                 # an up-to-date CLI is exactly what fails here. The endpoint
                 # simply hasn't promoted to the API release this CLI speaks.
                 human = (
-                    f"Run {job_id} completed, but {self.endpoint_label} "
+                    f"Run {job_id}{self._item_label()} completed, but "
+                    f"{self.endpoint_label} "
                     "answered with the pre-cutover response contract "
                     "(top-level 'data' instead of 'result'). This CLI is "
                     "current; that API target has not promoted to the new "
@@ -414,8 +427,9 @@ class Guarantee:
                 )
             else:
                 human = (
-                    f"Run {job_id} completed without an inline result; the "
-                    f"response's top-level keys were: {', '.join(sorted(payload))}."
+                    f"Run {job_id}{self._item_label()} completed without "
+                    f"an inline result; the response's top-level keys "
+                    f"were: {', '.join(sorted(payload))}."
                 )
             # The diagnosis rides on the ticket: job.json is the durable
             # record history list reads the reason from.
@@ -470,7 +484,8 @@ class Guarantee:
                 **self.context,
                 "reason": problem,
             },
-            f"Run {outcome.job_id} completed, but its result does not match "
+            f"Run {outcome.job_id}{self._item_label()} completed, but "
+            "its result does not match "
             f"the contract this CLI understands: {problem}. The API "
             "usually runs ahead of the CLI — upgrade ade (re-run the "
             "installer, or `uv tool upgrade ade-cli`), then re-run the "
@@ -613,8 +628,9 @@ class Guarantee:
                         self.progress.close()
                         exit_with(
                             {"status": "pending", "run_id": None, **self.context},
-                            "Another process took over this guarantee; "
-                            "re-run the same command to join it.",
+                            f"Another process took over this guarantee"
+                            f"{self._item_label()}; re-run the same "
+                            "command to join it.",
                             as_json=self.as_json,
                             code=EXIT_PENDING,
                         )

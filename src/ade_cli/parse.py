@@ -20,7 +20,7 @@ from pathlib import Path
 
 import typer
 
-from . import credentials, elements, items, oauth, store
+from . import attach, credentials, elements, items, oauth, store
 from .config import DEFAULT_ENVIRONMENT, ENVIRONMENTS, ade_home, resolve_target
 from .gateway import Gateway
 from . import guarantee as lifecycle
@@ -152,6 +152,15 @@ def parse(
         help="Re-parse even if already parsed, or abandon an unreadable job "
         "for a fresh one (bills a new parse).",
     ),
+    keep_copy: bool = typer.Option(
+        False, "--keep-copy",
+        help="--document-url only: also download the document into the "
+        "job item (plain HTTP, no API credits) so page previews and "
+        "crops render locally — fetched now, while the URL (often "
+        "pre-signed) still works. Without it, the first `view`/`crop` "
+        "fetches the copy instead, by which time a pre-signed URL may "
+        "have expired.",
+    ),
     include: list[Include] = typer.Option(
         [],
         "--include",
@@ -178,6 +187,17 @@ def parse(
             as_json=as_json,
             code=EXIT_USAGE,
         )
+    if keep_copy and document_url is None:
+        message = (
+            "--keep-copy applies to --document-url parses; a local parse "
+            "already renders previews from its file."
+        )
+        exit_with(
+            {"error": "keep_copy_local_source", "message": message},
+            message,
+            as_json=as_json,
+            code=EXIT_USAGE,
+        )
 
     resolved = resolve_target(home, environment, as_json=as_json)
     active = credentials.require(home, resolved, as_json=as_json)
@@ -187,6 +207,7 @@ def parse(
         auth=oauth.bearer_auth(home, resolved, active, ports),
         transport=ports.transport,
         command="parse",
+        org_id=active.org_id,
     )
     jobs = store.JobStore(home)
     # --options is the full ParseOptions object, passed through verbatim —
@@ -258,6 +279,7 @@ def parse(
         cached: bool,
         stored: bool = True,
         completed_at: float | None = None,
+        copy_info: dict | None = None,
     ) -> None:
         meta = data["metadata"]
         billing = meta["billing"]
@@ -296,6 +318,21 @@ def parse(
             f"\n  next:    ade view {ref} --open"
             f"   ·   ade extract {ref} --schema <schema.json>"
         )
+        copy_line = ""
+        if copy_info is not None:
+            if copy_info.get("error"):
+                # The parse itself succeeded and billed; a failed copy is
+                # a warning with the later remediation, never a failure.
+                copy_line = (
+                    f"\n  copy:    keep-copy failed — {copy_info['error']} "
+                    f"(the parse succeeded; `ade view {ref}` retries the "
+                    "fetch automatically)"
+                )
+            else:
+                copy_line = (
+                    f"\n  copy:    {copy_info['name']} saved into the job "
+                    "item — page previews and crops render locally"
+                )
         payload = {
             "status": "parsed",
             # The server-side run id — user-facing name for what the wire
@@ -314,6 +351,10 @@ def parse(
             "store_dir": str(store_dir),
             "artifacts": PARSE_ARTIFACTS,
         }
+        if copy_info is not None:
+            payload["kept_copy"] = not copy_info.get("error")
+            if copy_info.get("error"):
+                payload["keep_copy_error"] = copy_info["error"]
         # Asked-for bulk artifacts ride on stdout, so a caller never has to
         # reconstruct a store path to reach the result it just paid for.
         # Computed from the response in hand — the same bytes the artifacts
@@ -340,10 +381,35 @@ def parse(
                 f"\n  pages:   {meta['page_count']} ({failed_note})"
                 f"\n  credits: {billing['total_credits']} ({billing['service_tier']})"
                 + saved_line
+                + copy_line
                 + next_line
             ),
             as_json=as_json,
         )
+
+    def maybe_keep_copy() -> dict | None:
+        """The --keep-copy download (#169), after the parse settled: while
+        the URL — often pre-signed — still works. Idempotent (an attached
+        copy is kept), and never fails the parse: the billable work
+        already succeeded."""
+        if not keep_copy:
+            return None
+        meta = jobs.read_json(item_id, "meta.json") or {}
+        if attach.attached_file(jobs, item_id, meta) is not None:
+            return {"kept": True, "name": meta.get("attached_source")}
+        if not meta.get("source"):
+            return {
+                "kept": False,
+                "error": "the store record is owned by a newer run",
+            }
+        try:
+            name, _size = attach.download(
+                jobs, item_id, meta,
+                transport=ports.transport, now=ports.clock.now(),
+            )
+        except attach.AttachError as error:
+            return {"kept": False, "error": error.message}
+        return {"kept": True, "name": name}
 
     # The guarantee: this exact invocation (source x content x params — the
     # id) is served from disk free — unless the last attempt failed (a
@@ -358,6 +424,7 @@ def parse(
                 stored_meta["job_id"],
                 cached=True,
                 completed_at=stored_meta.get("completed_at"),
+                copy_info=maybe_keep_copy(),
             )
             return
 
@@ -377,7 +444,7 @@ def parse(
         as_json=as_json,
         endpoint_label=resolved.endpoint_label,
     )
-    emit_summary(data, job_id, cached=False, stored=stored)
+    emit_summary(data, job_id, cached=False, stored=stored, copy_info=maybe_keep_copy())
 
 
 def ensure_parsed(

@@ -73,17 +73,28 @@ def history_js_items(cli):
     return payload["items"]
 
 
-def test_history_js_lists_latest_submission_first(cli, document):
-    """The sidebar renders history.js in file order; the newest run is what
-    the user just did, so it leads. `history list` keeps oldest-first."""
+def test_history_lists_newest_submission_first_by_default(cli, document):
+    """Listings lead with the run the user just did — the same order the
+    sidebar has always used; --asc restores the chronological read."""
     first = parse_file(cli, document)
     cli.clock.sleep(60)  # the second run submits later
     second = parse_file(cli, document, "--tier", "standard", job_id="job-0002")
 
     result = cli.invoke("history", "list", "--json")
-
-    assert [r["job_item_id"] for r in json.loads(result.stdout)] == [first, second]
+    assert [r["job_item_id"] for r in json.loads(result.stdout)] == [second, first]
     assert [item["id"] for item in history_js_items(cli)] == [second, first]
+
+    # --asc: oldest first, on both the subcommand and the bare default.
+    ascending = cli.invoke("history", "list", "--asc", "--json")
+    assert [r["job_item_id"] for r in json.loads(ascending.stdout)] == [first, second]
+    bare = cli.invoke("history", "--asc", "--json")
+    assert [r["job_item_id"] for r in json.loads(bare.stdout)] == [first, second]
+
+    # The human rendering follows the same order as --json.
+    human = cli.invoke("history", "list")
+    lines = [ln for ln in human.stdout.splitlines() if ln.strip()]
+    assert lines[0].startswith(second)
+    assert lines[1].startswith(first)
 
 
 def test_bare_history_defaults_to_list(cli, document):
@@ -749,3 +760,85 @@ def test_extract_record_parse_linkage_uses_run_terminology(
         (cli.home / "jobs" / extract_id / "parse/ref.json").read_text()
     )
     assert ref == {"job_item_id": parse_id, "parse_job_id": "job-0001"}
+
+
+# --- the listing cap: newest 100 by default ---------------------------------
+
+
+def seed_minimal_item(cli, item_id, submitted_at, *, parent=None):
+    """A minimal on-disk item (meta + ticket), fast enough to seed the
+    store past the listing cap without 100+ transport round-trips."""
+    item = cli.home / "jobs" / item_id
+    item.mkdir(parents=True, exist_ok=True)
+    (item / "meta.json").write_text(json.dumps({
+        "job_item_id": item_id,
+        "kind": "extract" if parent else "parse",
+        "state": "extracted" if parent else "parsed",
+        "source": f"/tmp/{item_id}.pdf",
+        "job_id": f"run-{item_id}",
+        "params": {"model": "dpt-3-pro-latest", "options": {}, "tier": "priority"},
+        "completed_at": submitted_at + 1,
+    }))
+    (item / "job.json").write_text(json.dumps({
+        "v": 1, "kind": "extract" if parent else "parse",
+        "job_id": f"run-{item_id}", "state": "completed",
+        "submitted_at": submitted_at,
+    }))
+    if parent:
+        (item / "parse").mkdir(exist_ok=True)
+        (item / "parse" / "ref.json").write_text(
+            json.dumps({"job_item_id": parent, "parse_job_id": f"run-{parent}"})
+        )
+    return item_id
+
+
+def test_history_list_caps_at_the_newest_100_by_default(cli):
+    for n in range(120):
+        seed_minimal_item(cli, f"{n:016x}", 1_000_000.0 + n)
+
+    result = cli.invoke("history", "list", "--json")
+    listed = json.loads(result.stdout)
+    assert len(listed) == 100
+    # The newest 100: items 20..119, newest first.
+    assert listed[0]["job_item_id"] == f"{119:016x}"
+    assert listed[-1]["job_item_id"] == f"{20:016x}"
+    # The cap is said out loud — on stderr, never in the payload.
+    assert "newest 100 of 120" in result.stderr
+    assert "--all" in result.stderr
+
+    # --limit and --all adjust it; small stores never see a footer.
+    five = json.loads(cli.invoke("history", "list", "--limit", "5", "--json").stdout)
+    assert [r["job_item_id"] for r in five] == [
+        f"{n:016x}" for n in range(119, 114, -1)
+    ]
+    everything = cli.invoke("history", "list", "--all", "--json")
+    assert len(json.loads(everything.stdout)) == 120
+    assert everything.stderr.strip() == ""
+
+    # --asc under the cap is a chronological tail: the SAME newest set,
+    # presented oldest first.
+    tail = json.loads(cli.invoke("history", "list", "--asc", "--json").stdout)
+    assert tail[0]["job_item_id"] == f"{20:016x}"
+    assert tail[-1]["job_item_id"] == f"{119:016x}"
+
+    # The human rendering LEADS with the notice — a reader knows the view
+    # is capped before scanning it — and it names the way out.
+    human = cli.invoke("history", "list")
+    first_line = human.stdout.splitlines()[0]
+    assert "newest 100 of 120" in first_line
+    assert "ade history list --all" in first_line
+
+
+def test_a_capped_listing_never_drops_a_child_whose_parent_fell_outside(cli):
+    """--limit keeps the newest N records; an extract whose parse fell
+    outside the window still renders — as its own top row — instead of
+    silently vanishing from the human listing."""
+    parse_id = seed_minimal_item(cli, "aa" * 8, 1_000_000.0)
+    extract_id = seed_minimal_item(cli, "bb" * 8, 1_000_100.0, parent=parse_id)
+
+    result = cli.invoke("history", "list", "--limit", "1", "--json")
+    listed = json.loads(result.stdout)
+    assert [r["job_item_id"] for r in listed] == [extract_id]
+
+    human = cli.invoke("history", "list", "--limit", "1")
+    assert extract_id in human.stdout  # rendered, not dropped by grouping

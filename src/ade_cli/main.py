@@ -73,7 +73,10 @@ class AdeGroup(LedgerGroup):
                 break
             flags.append(token)
         if "--id-only" in flags:
-            typer.echo(error.format_message(), err=True)
+            # The payload's message, not format_message() directly: the
+            # payload builder also undoes typer's repr()-doubled
+            # backslashes on Windows paths (#172).
+            typer.echo(click_usage_payload(error)["message"], err=True)
             raise SystemExit(EXIT_USAGE)
         if "--json" in flags:
             typer.echo(json.dumps(click_usage_payload(error), indent=2))

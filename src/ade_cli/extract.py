@@ -96,7 +96,9 @@ def _load_schema(spec: str, *, as_json: bool) -> dict:
                     "error": "bad_schema",
                     "message": f"--schema file {spec} is unreadable: {error}",
                 },
-                f"--schema {spec!r} names a file that cannot be read "
+                # '{spec}' rather than {spec!r}: repr doubles every
+                # backslash of a Windows path (#172).
+                f"--schema '{spec}' names a file that cannot be read "
                 f"({error}); fix the file or pass an inline JSON object.",
                 as_json=as_json,
                 code=EXIT_USAGE,
@@ -113,7 +115,7 @@ def _load_schema(spec: str, *, as_json: bool) -> dict:
                 "error": "bad_schema",
                 "message": "--schema must be a JSON Schema file or an inline JSON object.",
             },
-            f"--schema {spec!r} is neither a readable file nor an inline "
+            f"--schema '{spec}' is neither a readable file nor an inline "
             "JSON object; pass a JSON Schema file path or a JSON object literal.",
             as_json=as_json,
             code=EXIT_USAGE,
@@ -455,6 +457,7 @@ def extract(
         auth=oauth.bearer_auth(home, resolved, active, ports),
         transport=ports.transport,
         command="extract",
+        org_id=active.org_id,
     )
 
     if parse_first is not None:
@@ -597,11 +600,12 @@ def extract(
             else ""
         )
         next_cmds = ["ade history list --json"]
-        if parse_item_id is not None:
-            # The referenced parse item's viewer renders this extraction as
-            # a layer; a bring-your-own-markdown item has no parse and never
-            # will, so hinting at the viewer would hint at an error.
-            next_cmds.append(f"ade view {items.short_id(jobs, parse_item_id)} --open")
+        # The extract item owns its viewer (decision 8 as amended
+        # 2026-07-21): it renders THIS extraction — over the referenced
+        # parse's pages, or the copied-in markdown alone. The parse item's
+        # viewer deliberately holds parse only, so hinting it here sent
+        # every user to an empty extractions pane (#170).
+        next_cmds.append(f"ade view {items.short_id(jobs, item_id)} --open")
         next_line = "\n  next:     " + "   ·   ".join(next_cmds)
         payload = {
             "status": "extracted",

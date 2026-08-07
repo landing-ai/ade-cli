@@ -596,3 +596,82 @@ def test_single_crop_output_path_creates_missing_parents(cli, parsed, tmp_path):
     assert out.is_file()
     assert payload["crops"][0]["path"] == str(out)
     assert payload["directory"] == str(out.parent)
+
+
+def url_parsed(cli):
+    """Seed a URL-sourced parse item through the seam; returns its id."""
+    cli.transport.respond(202, {"job_id": "job-0001"})
+    cli.transport.respond(200, completed_job(rich_parse_response()))
+    parsed = cli.invoke(
+        "parse", "--document-url", "https://example.com/doc.pdf",
+        "--json", env=AUTH_ENV,
+    )
+    assert parsed.exit_code == 0, parsed.stdout
+    return json.loads(parsed.stdout)["job_item_id"]
+
+
+def test_crop_of_a_url_parsed_item_names_the_remediation(cli):
+    """#169's crop face: a URL parse with the fetch suppressed has no
+    local bytes to crop from — the error must say why and how to get
+    crops, not claim a file vanished."""
+    item_id = url_parsed(cli)
+
+    payload = crop_json(
+        cli, item_id, "--element-id", "text-0", "--no-download", exit_code=1
+    )
+
+    assert payload["error"] == "source_missing"
+    assert "parsed from a URL" in payload["message"]
+    assert "--no-download" in payload["message"]  # the suppressed fetch
+    assert "ade parse -d" in payload["message"]
+
+
+def test_crop_auto_downloads_the_url_document(cli, pdf):
+    """A plain `ade crop` on a URL-sourced item fetches the copy by
+    default (mirroring `view`) and crops from it in the same run, with
+    the unverified-bytes caveat as its warning."""
+    import httpx
+
+    item_id = url_parsed(cli)
+    body = pdf.read_bytes()
+    cli.transport.respond_with(lambda req: httpx.Response(200, content=body))
+
+    payload = crop_json(cli, item_id, "--element-id", "text-0")
+
+    assert payload["status"] == "cropped"
+    assert payload["downloaded"] is True
+    assert "downloaded copy" in payload["warning"]
+    assert str(cli.transport.requests[-1].url) == "https://example.com/doc.pdf"
+    assert (cli.home / "jobs" / item_id / "document.pdf").read_bytes() == body
+
+    # The copy attached: the next crop has nothing to fetch.
+    seen = len(cli.transport.requests)
+    again = crop_json(cli, item_id, "--element-id", "text-0")
+    assert len(cli.transport.requests) == seen
+    assert "downloaded" not in again
+
+
+def test_crop_auto_download_failure_is_the_crops_failure(cli):
+    """Unlike `view` there is no degraded render to fall back to — an
+    expired URL fails the crop with the download error, which is exactly
+    what the no-copy state already meant."""
+    import httpx
+
+    item_id = url_parsed(cli)
+    cli.transport.respond_with(lambda req: httpx.Response(403, content=b"denied"))
+
+    payload = crop_json(cli, item_id, "--element-id", "text-0", exit_code=1)
+
+    assert payload["error"] == "download_failed"
+    assert "expire" in payload["message"]
+    assert not (cli.home / "jobs" / item_id / "document.pdf").exists()
+
+
+def test_crop_download_refuses_a_local_source_item(cli, parsed):
+    item_id, _ = parsed
+
+    payload = crop_json(
+        cli, item_id, "--element-id", "text-0", "--download", exit_code=2
+    )
+
+    assert payload["error"] == "not_a_url_source"

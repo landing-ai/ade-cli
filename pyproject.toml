@@ -1,6 +1,6 @@
 [project]
 name = "ade-cli"
-version = "1.0.2"
+version = "1.0.5"
 description = "CLI for Agentic Document Extraction (ADE) — parse and extract documents with the v2 APIs, backed by a local store"
 readme = "README.md"
 license = "Apache-2.0"

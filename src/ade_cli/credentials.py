@@ -38,6 +38,21 @@ class ActiveCredential:
     def masked(self) -> str:
         return mask(self.secret)
 
+    @property
+    def org_id(self) -> str | None:
+        """The OAuth session's selected organization id (ADR-0009), sent
+        as ``x-org-id`` on API requests. None for API keys (already
+        organization-bound) and for sessions with no selection (the
+        platform default organization applies)."""
+        if self.oauth is None:
+            return None
+        organization = self.oauth.get("organization")
+        if isinstance(organization, dict):
+            value = organization.get("id")
+            if isinstance(value, str) and value:
+                return value
+        return None
+
 
 def mask(secret: str) -> str:
     if len(secret) <= 8:

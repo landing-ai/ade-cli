@@ -23,7 +23,13 @@ Prefer it over N `--help` round trips. `ade help workflow` (also
 `output`, `credentials`, `errors`) is the conceptual page behind it.
 Check credentials with `ade auth status --json`; if logged out, set
 `ADE_API_KEY`, or pipe a key in (`echo $KEY | ade auth login`) — no
-terminal required either way.
+terminal required either way. An API key acts in the organization it
+was created in; browser (OAuth) sessions carry their own selection —
+`status` reports it, `ade auth org list --json` shows the memberships,
+and `ade auth org switch <org> --env <env>` changes it. If a run must
+bill to a specific organization, confirm the selection *before*
+parsing: re-running the same invocation after a switch joins the
+recorded run instead of re-billing under the new organization.
 
 ## Conventions
 
@@ -161,6 +167,11 @@ the summaries print each item's store path.
 - `extract.json` — raw extraction result with per-field spans
 - `evidence.json` — the field→box join (element ids, pages, boxes)
 
+One vocabulary note when reading these files: on-disk records
+(`meta.json`, `job.json`, `parse/ref.json`) spell the server-side run id
+as `job_id` — the wire contract's name for the same value `--json`
+payloads report as `run_id`. Neither is ever the job item id.
+
 Prefer `find` over loading `elements.json` into context: it returns
 joined records, not lines. `history clear JOB_ITEM_ID` deletes an item;
 clearing a parse item cascades to the extractions referencing it.
@@ -179,3 +190,10 @@ clearing a parse item cascades to the extractions referencing it.
 - **`--markdown` extractions have no page evidence** (there is no parse
   to join against) — evidence degrades to spans-only, and `view`
   renders the markdown pane alone.
+- **URL parses have no local bytes**, so page imagery renders from an
+  attached copy: `parse --document-url … --keep-copy` fetches it at
+  parse time (reliable — pre-signed URLs expire); otherwise the first
+  `view`/`crop` downloads it automatically (`--no-download` skips;
+  the payload records `downloaded`, and on a failed fetch `view`
+  degrades to an empty preview with `download_error` while `crop`
+  errors). Markdown, elements, and extractions work either way.

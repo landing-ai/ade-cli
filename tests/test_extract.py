@@ -794,11 +794,13 @@ def test_extract_summary_advertises_store_dir_and_next_commands(
         )
         line = summary_next_line(result.stdout)
         assert "ade history list" in line
-        # The viewer hint names the referenced parse item (its viewer
-        # renders this extraction as a layer), by a runnable short prefix.
+        # The viewer hint names the extract item's OWN id (#170): that is
+        # the only viewer that renders this extraction — the parse item's
+        # viewer deliberately holds parse only.
         assert "ade view " in line and "--open" in line
         ref = line.split("ade view ", 1)[1].split()[0]
-        assert parse_id.startswith(ref)
+        assert extract_dir.name.startswith(ref)
+        assert not parse_id.startswith(ref)
 
 
 def test_extract_json_carries_the_contract_fields(cli, document, schema_file):
@@ -920,9 +922,10 @@ def test_partial_state_survives_the_cached_path_and_listings(
     assert '"warnings": 1' in sidebar
 
 
-def test_markdown_extraction_next_hint_never_points_at_the_viewer(cli, tmp_path):
-    # A bring-your-own-markdown item has no parse and never will: hinting at
-    # `view` would hint at an error.
+def test_markdown_extraction_next_hint_points_at_its_own_viewer(cli, tmp_path):
+    # A bring-your-own-markdown item owns a viewer too (the markdown pane
+    # alone, opening on the Extract tab) — the hint names its own id
+    # (#170), same as the parse-backed form.
     md = tmp_path / "notes.md"
     md.write_text("# Notes\nTotal: €42\n")
     cli.transport.respond(202, {"job_id": "extract-0001"})
@@ -933,9 +936,11 @@ def test_markdown_extraction_next_hint_never_points_at_the_viewer(cli, tmp_path)
     )
 
     assert result.exit_code == 0, result.stdout
+    (extract_dir,) = extract_item_dirs(cli)
     line = summary_next_line(result.stdout)
     assert "ade history list" in line
-    assert "ade view" not in line
+    ref = line.split("ade view ", 1)[1].split()[0]
+    assert extract_dir.name.startswith(ref)
 
 
 def test_extract_summary_and_payload_name_the_server_run_never_job(

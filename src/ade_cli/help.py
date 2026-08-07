@@ -49,6 +49,9 @@ BANDS: list[tuple[str, list[str]]] = [
             "auth login",
             "auth status",
             "auth logout",
+            "auth org list",
+            "auth org switch",
+            "auth org clear",
             "login",
             "logout",
             "version",
@@ -138,6 +141,17 @@ TOPICS: list[dict] = [
             "",
             "`ade auth status --json` reports the resolved target, how it is",
             "authenticated, and every other environment holding a credential.",
+            "",
+            "Browser (OAuth) logins act in one Logto organization: a single",
+            "membership selects itself; several prompt at login (or take",
+            "--org). `ade auth org list` shows the memberships live (and",
+            "flags a selection that is no longer one of them),",
+            "`ade auth org switch <org>` changes the selection without a",
+            "re-login, and `ade auth org clear` falls back to the platform",
+            "default. Requests run — and bill — in the selected",
+            "organization; none selected means the platform default applies.",
+            "An API key needs no selection and accepts none: it acts in the",
+            "organization it was created in.",
         ],
     },
     {
@@ -182,6 +196,10 @@ RESULTS: dict[str, dict] = {
             ("artifacts", "artifact filenames written there"),
             ("markdown", "the parse markdown — only with `--include markdown`"),
             ("elements", "the flat projection — only with `--include elements`"),
+            ("kept_copy", "with `--keep-copy`: whether the URL document's "
+             "copy was stored in the job item"),
+            ("keep_copy_error", "with `--keep-copy`: why the copy could not "
+             "be stored (the parse itself still succeeded)"),
         ],
     },
     "extract": {
@@ -233,6 +251,9 @@ RESULTS: dict[str, dict] = {
             ("directory", "where they landed"),
             ("crops", "one record per PNG (element_id, type, "
              "page, box, dpi, path, width, height)"),
+            ("downloaded", "URL items: true when this run fetched the "
+             "document into the parse item before cropping (absent when "
+             "nothing needed fetching)"),
         ],
         "note": "One shape whatever matched: a single `--element-id` is "
         "count 1 with one crops[] record; a filter (`--type`/`--page`/`--all`) "
@@ -248,6 +269,13 @@ RESULTS: dict[str, dict] = {
             ("built", "true when this run rebuilt the artifact"),
             ("pages_embedded", "pages inlined; the rest load from sidecars"),
             ("note", "why the render weakened, when it did (else null)"),
+            ("downloaded", "URL items: true when this run fetched the "
+             "document into the job item (automatic on first view). false "
+             "when the automatic fetch failed (see download_error) or "
+             "explicit `--download` found the copy already attached; absent "
+             "when nothing needed fetching"),
+            ("download_error", "why the automatic fetch failed, when it "
+             "did (the viewer still builds, previews empty; else absent)"),
             ("deep_link", "view.html#element=... when `--element-id` was given"),
             ("history_items", "items in the rebuilt sidebar read model"),
             ("sidebar_sync", "true when sibling viewers build in the background"),
@@ -268,6 +296,12 @@ RESULTS: dict[str, dict] = {
              "`--force` re-run after this extraction"),
             ("created_at / completed_at", "epoch seconds (null when unknown)"),
         ],
+        "note": "Ordered newest submission first (timestamp-less items "
+        "last), matching the viewer sidebar; --asc restores oldest-first. "
+        "Capped at the newest 100 items by default — --limit N adjusts, "
+        "--all lifts the cap, and a capped run says so up front (the "
+        "first line of the listing; on stderr for --json). The --json "
+        "array follows the same order and cap.",
     },
     "history clear": {
         "shape": "object",
@@ -287,6 +321,8 @@ RESULTS: dict[str, dict] = {
             ("endpoint", "its endpoint"),
             ("endpoint_source", "default | config | env"),
             ("identity", "OAuth logins: the token's identity claims"),
+            ("organization", "OAuth logins: the selected organization "
+             "({id, name}; null when the platform default applies)"),
         ],
     },
     "auth status": {
@@ -298,7 +334,39 @@ RESULTS: dict[str, dict] = {
             ("source", "env (ADE_API_KEY) | stored"),
             ("environment / endpoint / endpoint_source", "the resolved target"),
             ("other_environments", "every other environment holding a credential"),
-            ("expires_at / expires_in_seconds / refresh_token", "OAuth only"),
+            ("expires_at / expires_in_seconds / refresh_token / organization",
+             "OAuth only"),
+        ],
+    },
+    "auth org list": {
+        "shape": "object",
+        "keys": [
+            ("organizations", "your memberships, live from the login "
+             "provider: [{id, name, selected}]"),
+            ("selected", "the selected organization id (null when the "
+             "platform default applies)"),
+            ("selected_is_stale", "true when the selection is no longer one "
+             "of your memberships — requests still send it and the platform "
+             "rejects them; switch or clear"),
+            ("environment", "the resolved target"),
+        ],
+    },
+    "auth org switch": {
+        "shape": "object",
+        "keys": [
+            ("organization", "the selection now stored ({id, name})"),
+            ("previous", "the selection it replaced (null if none)"),
+            ("stored", "always true on success"),
+            ("environment", "the resolved target"),
+        ],
+    },
+    "auth org clear": {
+        "shape": "object",
+        "keys": [
+            ("organization", "always null — the platform default now applies"),
+            ("previous", "the selection that was dropped (null if none)"),
+            ("cleared", "false when there was nothing selected"),
+            ("environment", "the resolved target"),
         ],
     },
     "auth logout": {
@@ -403,7 +471,10 @@ CONVENTIONS = [
         "job item ids",
         "Store commands take a job item id or an unambiguous prefix. "
         "Discover ids with `history list`; ambiguous or unknown ids error "
-        "with candidates listed.",
+        "with candidates listed. Distinct from the server-side run id: "
+        "--json payloads report that as run_id, and on-disk records spell "
+        "the same value job_id (the wire's name) — neither is ever a "
+        "job item id.",
     ),
     (
         "guarantees",
@@ -444,7 +515,8 @@ STORE_LAYOUT = [
     {
         "path": "  meta.json",
         "what": "commit record: kind, source, identity, params, state, "
-        "timestamps, artifact index",
+        "timestamps, artifact index. Its job_id field is the server-side "
+        "run id (= run_id in --json payloads), never the job item id",
     },
     {
         "path": "  job.json",
@@ -470,6 +542,13 @@ STORE_LAYOUT = [
         "path": "  markdown.md",
         "what": "bring-your-own-markdown extract items: the input markdown, "
         "copied in (spans index exactly these bytes)",
+    },
+    {
+        "path": "  document.<ext>",
+        "what": "URL parses: the attached document copy (`parse "
+        "--keep-copy`, or fetched automatically on first `view`/`crop`) "
+        "page previews and crops render from — unverified against the "
+        "parsed run",
     },
     {
         "path": "  view.html / crops/",
@@ -651,6 +730,7 @@ def _human(reference: dict, *, scoped: bool) -> str:
     lines.append("store layout")
     for entry in reference["store"]["layout"]:
         lines.append(f"  {entry['path']:<42}  {entry['what']}")
+    lines.append(f"  note: {reference['store']['note']}")
     lines.append("")
     lines.append("topics — conceptual pages, e.g. `ade help workflow`")
     for topic in reference["topics"]:
@@ -727,6 +807,12 @@ def help_command(
         "exit_states": EXIT_STATES,
         "store": {
             "home": "~/.ade (ADE_HOME overrides)",
+            # One vocabulary note for every on-disk record: job_id there
+            # is the wire's spelling of the run id.
+            "note": "On-disk records (meta.json, job.json, parse/ref.json) "
+            "spell the server-side run id as job_id — the wire contract's "
+            "name for the same value --json payloads report as run_id. "
+            "Neither is the job item id (the jobs/<id>/ folder name).",
             "layout": STORE_LAYOUT,
         },
     }

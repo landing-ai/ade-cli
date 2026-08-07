@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -41,7 +42,7 @@ from pathlib import Path
 
 import typer
 
-from . import elements, evidence, historyjs, items, serve
+from . import attach, elements, evidence, historyjs, items, serve
 from .config import ade_home
 from .crop import DEFAULT_CROP_DPI, crop_element_to_file
 from .history import resolve_or_exit
@@ -54,7 +55,7 @@ ARTIFACT = "view.html"
 # Bump when the Python-side bundle shaping changes (the fields the template
 # receives): the template hash alone can't see it, and a stale artifact
 # would otherwise be reused forever (its item identity never moves).
-BUNDLE_REVISION = 4
+BUNDLE_REVISION = 5
 DEFAULT_DPI = 120
 # Embed posture: modest dpi, first PAGE_CAP pages inline (--pages picks a
 # different window); everything else lazy-loads from the sidecar chunks.
@@ -179,6 +180,14 @@ def _referencing_extractions(
     return layers
 
 
+def _imagery_source(store: JobStore, bundle: dict) -> str | None:
+    """What this bundle's page imagery renders from: the parse item's
+    recorded source, or its attached copy for URL parses (#169 —
+    `parse --keep-copy`, or fetched on first `view`/`crop`)."""
+    owner = bundle.get("parse_item_id") or bundle["record"]["job_item_id"]
+    return attach.renderable_source(store, owner, bundle["parse_meta"])
+
+
 class BundleError(Exception):
     def __init__(self, kind: str, message: str, hint: str):
         super().__init__(message)
@@ -295,13 +304,15 @@ def _fingerprint(
     *,
     dpi: int,
     pages: str | None,
+    render_from: str | None,
 ) -> str:
     """What the artifact was built from: template, item kind/linkage, parse
     generation, the extraction layers (a new, newly-stale, or removed layer
-    changes the artifact), build params, and the source's identity-by-stat
-    (a moved or edited source must rebuild — page images render from it)."""
+    changes the artifact), build params, and the render source's
+    identity-by-stat (a moved or edited source must rebuild — page images
+    render from it; attaching a URL item's copy moves it too, #169)."""
     meta = bundle["parse_meta"]
-    source = meta.get("source")
+    source = render_from
     path = Path(source) if source else None
     if path is not None and path.is_file():
         stat = path.stat()
@@ -372,12 +383,14 @@ def _write_pages_chunk(
     store.write_text(parse_item_id, _chunk_name(index), js)
 
 
-def _pages_fingerprint(meta: dict, total_pages: int) -> str:
-    """What the sidecar chunks were rendered from: the source's
+def _pages_fingerprint(render_from: str | None, total_pages: int) -> str:
+    """What the sidecar chunks were rendered from: the render source's
     identity-by-stat and the render scheme. Imagery derives from the
     source alone (never the parse generation), so job_id stays out — a
-    --force re-parse of an unchanged file must not re-render every page."""
-    source = meta.get("source")
+    --force re-parse of an unchanged file must not re-render every page.
+    ``render_from`` is the resolved local path (the recorded source, or a
+    URL item's attached copy — #169)."""
+    source = render_from
     path = Path(source) if source else None
     if path is not None and path.is_file():
         stat = path.stat()
@@ -421,7 +434,8 @@ def _ensure_pages_chunks(
     that yields no images stops the sweep — the viewer's placeholders and
     notice explain, and nothing half-written poses as current."""
     total = _chunk_count(len(all_pages))
-    fingerprint = _pages_fingerprint(meta, len(all_pages))
+    render_from = attach.renderable_source(store, parse_item_id, meta)
+    fingerprint = _pages_fingerprint(render_from, len(all_pages))
     written = 0
     for index in range(1, total + 1):
         if only is not None and index not in only:
@@ -429,9 +443,7 @@ def _ensure_pages_chunks(
         if _chunk_current(store, parse_item_id, index, fingerprint):
             continue
         pages = all_pages[(index - 1) * PAGES_CHUNK : index * PAGES_CHUNK]
-        images, _note = render_source(
-            meta.get("source"), pages, dpi=DEFAULT_DPI, cap=0
-        )
+        images, _note = render_source(render_from, pages, dpi=DEFAULT_DPI, cap=0)
         if not images:
             break
         _write_pages_chunk(store, parse_item_id, index, total, images, fingerprint)
@@ -446,7 +458,8 @@ def _write_free_chunks(
     images — write every chunk they fully cover for free; the background
     builder renders the rest."""
     total = _chunk_count(len(all_pages))
-    fingerprint = _pages_fingerprint(meta, len(all_pages))
+    render_from = attach.renderable_source(store, item_id, meta)
+    fingerprint = _pages_fingerprint(render_from, len(all_pages))
     for index in range(1, total + 1):
         pages = all_pages[(index - 1) * PAGES_CHUNK : index * PAGES_CHUNK]
         chunk_images = {p: images[p] for p in pages if p in images}
@@ -530,6 +543,7 @@ def _build(
     pages_spec: str | None,
     fingerprint: str,
     built_at: str,
+    render_from: str | None,
 ) -> tuple[Path, int, str | None]:
     """Stamp the template with this job item's data; returns
     ``(path, pages embedded, degradation note)``."""
@@ -574,7 +588,7 @@ def _build(
             images, note = {}, None
         else:
             images, note = render_source(
-                meta.get("source"), wanted, dpi=dpi, cap=PAGE_CAP
+                render_from, wanted, dpi=dpi, cap=PAGE_CAP
             )
             # A missing/URL source is a stable input (its reappearance
             # changes the fingerprint), but a render *error* is transient —
@@ -604,7 +618,7 @@ def _build(
         # Emit only when the head chunk actually exists — a source that
         # rendered nothing can't produce the rest either.
         if _chunk_current(
-            store, owner, 1, _pages_fingerprint(meta, len(all_pages))
+            store, owner, 1, _pages_fingerprint(render_from, len(all_pages))
         ):
             page_chunks = _page_chunks_payload(
                 all_pages, src_prefix=f"../{owner}/"
@@ -612,6 +626,12 @@ def _build(
             pages_key = owner
         else:
             page_chunks, pages_key = [], None
+            if render_from and render_from.startswith(("http://", "https://")):
+                # A URL parse without an attached copy can never render
+                # the sidecars this light artifact loads from — surface
+                # the same cause + action banner the parse viewer gets
+                # (#169) instead of bare placeholders.
+                _, note = render_source(render_from, [], dpi=DEFAULT_DPI, cap=0)
     else:
         page_chunks = _page_chunks_payload(all_pages, src_prefix="")
         pages_key = item_id
@@ -620,6 +640,30 @@ def _build(
     # themselves — so that case informs the CLI summary but never the
     # banner (a 235-page doc must not open under a warning).
     banner_note = note
+    # A URL item's missing preview gets the id-bearing action (#169): the
+    # cause comes from the raster layer; the command that fixes it needs
+    # the item id, which only this layer holds. The fetch is automatic
+    # now, so this note survives only a failed or suppressed download —
+    # the action is a retry, not a flag to discover.
+    if note and note.startswith("source unavailable: parsed from a URL"):
+        owner_id = bundle.get("parse_item_id") or item_id
+        action = (
+            f" Re-run `ade view {items.short_id(store, owner_id)} "
+            "--download` to fetch them, or keep a copy at parse time "
+            "with `parse --keep-copy`."
+        )
+        note += action
+        banner_note = note
+    # Renders from an attached copy carry the unverifiable-bytes caveat
+    # (#169) — short and actionable in the CLI note; in the artifact it
+    # renders as a compact banner line whose hover carries the full
+    # story, like the stale badge.
+    copy_caveat = attach.caveat(
+        store, bundle.get("parse_item_id") or item_id, meta
+    )
+    show_caveat = bool(copy_caveat and (images or page_chunks))
+    if show_caveat:
+        note = copy_caveat if note is None else f"{note}; {copy_caveat}"
     if page_chunks and note and "not embedded (cap" in note:
         deferred_pages = [p for p in all_pages if p not in images]
         note = (
@@ -669,6 +713,14 @@ def _build(
         "markdown": markdown_text,
         "raw_response": raw_response,
         "extractions": bundle["extractions"],
+        "copy_caveat": (
+            {
+                "text": "page previews render from a downloaded copy of the URL",
+                "detail": attach.CAVEAT_DETAIL,
+            }
+            if show_caveat
+            else None
+        ),
     }
     for page in payload["pages"]:
         page["image"] = page.pop("data_uri")
@@ -694,7 +746,10 @@ def ensure_built(
     behind the foreground command and the background builder. Raises
     BundleError when the item has nothing renderable."""
     bundle = _load_bundle(store, item_id)
-    fingerprint = _fingerprint(template, bundle, dpi=dpi, pages=pages)
+    render_from = _imagery_source(store, bundle)
+    fingerprint = _fingerprint(
+        template, bundle, dpi=dpi, pages=pages, render_from=render_from
+    )
     path = store.item_dir(item_id) / ARTIFACT
     if _stored_fingerprint(path) == fingerprint:
         return path, False, None, None
@@ -710,6 +765,7 @@ def ensure_built(
         pages_spec=pages,
         fingerprint=fingerprint,
         built_at=built_at,
+        render_from=render_from,
     )
     return path, True, embedded, note
 
@@ -772,17 +828,35 @@ def _needs_chunks(store: JobStore, record: dict) -> bool:
     if not pages:
         return False
     meta = store.read_json(record["job_item_id"], "meta.json") or {}
-    source = meta.get("source") or ""
+    source = attach.renderable_source(store, record["job_item_id"], meta) or ""
     if source.startswith(("http://", "https://")) or not Path(source).is_file():
-        # Nothing local to render from (URL source, or the file is gone):
-        # chunks can never materialize, and answering True here would
-        # detach a futile builder on every single view run.
+        # Nothing local to render from (URL source without an attached
+        # copy, or the file is gone): chunks can never materialize, and
+        # answering True here would detach a futile builder on every
+        # single view run.
         return False
-    fingerprint = _pages_fingerprint(meta, pages)
+    fingerprint = _pages_fingerprint(source, pages)
     return any(
         not _chunk_current(store, record["job_item_id"], index, fingerprint)
         for index in range(1, _chunk_count(pages) + 1)
     )
+
+
+def _detach_kwargs() -> dict:
+    """How a background child actually detaches, per platform. POSIX:
+    ``start_new_session`` (its own session, immune to the parent's
+    signals). Windows silently *ignores* ``start_new_session``, so the
+    "detached" child used to stay attached to the parent console — a
+    Ctrl-C or a closed terminal killed the builder mid-build. DETACHED
+    (no console at all — stdio is DEVNULL anyway) plus a new process
+    group makes the detachment real there."""
+    if os.name == "nt":  # pragma: no cover - exercised on Windows only
+        return {
+            "creationflags": (
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            )
+        }
+    return {"start_new_session": True}
 
 
 def _spawn_builder(store: JobStore, records: list[dict]) -> bool:
@@ -806,7 +880,7 @@ def _spawn_builder(store: JobStore, records: list[dict]) -> bool:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
-        start_new_session=True,
+        **_detach_kwargs(),
     )
     return True
 
@@ -821,7 +895,7 @@ def _spawn_server(port: int) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
-        start_new_session=True,
+        **_detach_kwargs(),
     )
 
 
@@ -830,8 +904,6 @@ def _sync_viewers(store: JobStore, now_fn) -> dict:
     with our pid — a dead claim is ignored by the scan and overwritten
     here), build, unclaim, rewriting history.js around every transition so
     open sidebars see building → built without a rebuild."""
-    import os
-
     template = _template()
     built, skipped, failed = [], [], []
     chunks = 0
@@ -914,6 +986,19 @@ def view(
     ),
     pages: str | None = typer.Option(
         None, "--pages", help="Pages to embed images for, 1-indexed, e.g. '1,3-5'."
+    ),
+    download: bool | None = typer.Option(
+        None, "--download/--no-download",
+        help="URL-parsed items: fetch the document from its recorded URL "
+        "into the job item and render page previews from that copy — "
+        "the parse itself never gives the CLI the bytes (#169). This "
+        "happens automatically when no copy is attached yet (a notice "
+        "and progress line land on stderr); --no-download skips the "
+        "fetch and previews stay empty. Explicit --download makes a "
+        "failed fetch an error instead of a warning. Plain HTTP, no API "
+        "credits; the copy is unverified against the parsed run. Also "
+        "works on an extract item id (fetches into its referenced parse "
+        "item).",
     ),
     no_sidebar_sync: bool = typer.Option(
         False, "--no-sidebar-sync",
@@ -1032,6 +1117,96 @@ def view(
             )
 
     record = items.item_record(store, item_id)
+
+    # Attaching the URL document's bytes happens on the imagery owner
+    # (the item itself, or a referencing extract's parse item) BEFORE the
+    # bundle loads, so this same run renders from the copy. Default is
+    # AUTO (#169 follow-up): a URL-sourced item with no attached copy
+    # fetches now — announced on stderr, never silently — because an
+    # empty preview surprised users more than an implicit fetch;
+    # --no-download suppresses. Explicit --download keeps the strict
+    # contract: wrong-kind items and failed fetches are errors, and the
+    # already-attached case still gets its receipt line.
+    download_line = ""
+    downloaded: bool | None = None
+    download_error: str | None = None
+    if download is not False:
+        if record["kind"] == "parse":
+            owner_id = item_id
+        else:
+            ref = record.get("parse") or {}
+            owner_id = (
+                ref.get("job_item_id") if not ref.get("missing") else None
+            )
+        owner_meta = (
+            store.read_json(owner_id, "meta.json") if owner_id else None
+        )
+        url_source = owner_id is not None and attach.is_url_source(owner_meta)
+        if download and not url_source:
+            message = (
+                f"Job item {item_id} has no URL source to download: "
+                "--download applies to items parsed from --document-url "
+                "(local parses render previews from their file directly)."
+            )
+            exit_with(
+                {
+                    "error": "not_a_url_source",
+                    "job_item_id": item_id,
+                    "message": message,
+                },
+                message,
+                as_json=as_json,
+                code=EXIT_USAGE,
+            )
+        already = (
+            attach.attached_file(store, owner_id, owner_meta)
+            if url_source
+            else None
+        )
+        if download and already is not None:
+            downloaded = False
+            download_line = (
+                f"\n  download: copy already attached ({already.name}); "
+                "previews render from it"
+            )
+        elif url_source and already is None:
+            try:
+                name, size = attach.download_with_notice(
+                    store,
+                    owner_id,
+                    owner_meta or {},
+                    ports=ports,
+                    as_json=as_json,
+                )
+            except attach.AttachError as error:
+                if download:
+                    exit_with(
+                        {
+                            "error": error.kind,
+                            "job_item_id": owner_id,
+                            "message": error.message,
+                        },
+                        error.message,
+                        as_json=as_json,
+                        code=EXIT_FAILED,
+                    )
+                # Auto mode degrades instead of failing: yesterday's
+                # working `ade view` must not start exiting non-zero the
+                # day the pre-signed URL expires — the viewer still
+                # builds, with the honest empty-preview note.
+                downloaded = False
+                download_error = error.message
+                download_line = (
+                    "\n  download: failed — page previews stay empty "
+                    f"({error.message})"
+                )
+            else:
+                downloaded = True
+                download_line = (
+                    f"\n  download: fetched {name} ({size:,} bytes) into "
+                    f"job item {owner_id}"
+                )
+
     try:
         bundle = _load_bundle(store, item_id)
     except BundleError as error:
@@ -1074,11 +1249,23 @@ def view(
                 source_item_id=bundle.get("parse_item_id") or item_id,
             )
         except CropError as error:
+            message = error.message
+            if "parsed from a URL" in message:
+                owner_id = bundle.get("parse_item_id") or item_id
+                message += (
+                    f" Re-run `ade view {owner_id} --download` to fetch "
+                    "it, then re-run this crop."
+                )
+                tail = ""
+            else:
+                tail = (
+                    " (a crop is never served from stale imagery; restore "
+                    "the source and re-run)"
+                )
             exit_with(
                 {"error": error.kind, "job_item_id": item_id,
-                 "element_id": element_id, "message": error.message},
-                f"Cannot crop {element_id}: {error.message} (a crop is never "
-                "served from stale imagery; restore the source and re-run).",
+                 "element_id": element_id, "message": message},
+                f"Cannot crop {element_id}: {message}{tail}.",
                 as_json=as_json,
                 code=EXIT_FAILED,
             )
@@ -1104,8 +1291,12 @@ def view(
         ]
         meta = bundle["parse_meta"]
         # Same drift rule as the standalone `crop` (issue #119): a changed
-        # source still renders, with the mismatch said out loud.
-        drift = source_drift_note(meta)
+        # source still renders, with the mismatch said out loud. URL items
+        # have no drift check; a crop from their attached copy carries the
+        # unverified-bytes caveat instead — mirroring standalone crop.
+        drift = source_drift_note(meta) or attach.caveat(
+            store, bundle.get("parse_item_id") or item_id, meta
+        )
         payload = {
             "job_item_id": item_id,
             "source_name": Path(meta["source"]).name if meta.get("source") else item_id,
@@ -1156,7 +1347,10 @@ def view(
 
     page_dpi = dpi if dpi is not None else DEFAULT_DPI
     template = _template()
-    fingerprint = _fingerprint(template, bundle, dpi=page_dpi, pages=pages)
+    render_from = _imagery_source(store, bundle)
+    fingerprint = _fingerprint(
+        template, bundle, dpi=page_dpi, pages=pages, render_from=render_from
+    )
     path = store.item_dir(item_id) / ARTIFACT
     built = _stored_fingerprint(path) != fingerprint
     embedded: int | None = None
@@ -1174,6 +1368,7 @@ def view(
             pages_spec=pages,
             fingerprint=fingerprint,
             built_at=built_at,
+            render_from=render_from,
         )
 
     # The sidebar contract: every run refreshes history.js from a fresh
@@ -1214,6 +1409,10 @@ def view(
         "history_items": len(history_records),
         "sidebar_sync": syncing,
     }
+    if downloaded is not None:
+        payload["downloaded"] = downloaded
+    if download_error is not None:
+        payload["download_error"] = download_error
     hint = f"ade view {items.short_id(store, item_id)} --open" + (
         f" --element-id {element_id}" if element_id else ""
     )
@@ -1228,6 +1427,7 @@ def view(
     human = (
         f"Viewer for job item {item_id} ({record['kind']}) -> {tilde(path)} "
         + ("(built)" if built else "(up to date)")
+        + download_line
         + (f"\n  note: {note}" if note else "")
         + (
             f"\n  serve: {serve_error} — falling back to file://"

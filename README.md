@@ -69,7 +69,11 @@ stderr; set `ADE_NO_UPDATE_CHECK=1` to turn that off.
 | `ade auth login --api-key -` | prompt for the key (hidden input) |
 | `echo $KEY \| ade auth login` | headless: a piped key is the prompt, answered |
 | `ade auth login --env eu` | log in to the EU region (no-op if it already holds a credential) |
+| `ade auth login --org acme` | browser sign-in acting in a specific organization (id or name) |
 | `ade auth status` | the resolved target + every other environment holding a credential |
+| `ade auth org list` | your organizations, live, marking the selected one |
+| `ade auth org switch acme` | act in a different organization — no re-login needed |
+| `ade auth org clear` | drop the selection, falling back to the platform default |
 | `ade auth logout` | log out of the resolved target |
 | `ade auth logout --env eu` | log out of a specific environment |
 | `ade auth logout --all` | log out of every environment |
@@ -81,6 +85,14 @@ stores refreshable tokens; nothing to copy. API keys come from your
 [LandingAI account settings](https://ade.landing.ai/settings/api-key).
 `login` verifies the key against the target environment before storing
 it — a mistyped key fails right at login, not at your first `parse`.
+
+If your account belongs to one organization, browser sign-in selects it
+automatically; if it belongs to several, the login asks (or takes
+`--org`), and `ade auth org switch` changes it any time without a
+browser round-trip. Requests run — and bill — in the selected
+organization. An API key needs no selection and accepts none: it acts
+in the organization it was created in, so to work in a different
+organization with keys, create a key there and log in with that one.
 
 **There is no "current environment" — the target is resolved fresh on every
 command**: the `--env` flag, else the `ADE_ENV` variable, else `production`.
@@ -122,6 +134,7 @@ open it exits immediately, naming all three paths.
 |---|---|
 | `ade parse -d invoice.pdf` | ensure parsed; artifacts land in `~/.ade` |
 | `ade parse --document-url https://…/doc.pdf` | server fetches the URL |
+| `ade parse --document-url https://… --keep-copy` | also store the document bytes locally, while the (often pre-signed) URL still works |
 | `ade parse -d doc.pdf --tier standard --wait 0` | cheap lane, submit-and-return |
 | `ade parse -d doc.pdf --env eu` | run in the EU region (or `export ADE_ENV=eu`) |
 | `ade parse -d doc.pdf --include markdown --json` | carry the markdown in the payload |
@@ -133,6 +146,9 @@ source path × content × params` — one flat folder under
 `parse.json` (raw response), `parse.md` (markdown with its doc_id trailer),
 `elements.json` (flat elements projection, recomputable from `parse.json`),
 `meta.json` (provenance + params + identity), `job.json` (claim ticket).
+(Inside these files the server-side run id is spelled `job_id` — the
+wire's name for the same value `--json` payloads report as `run_id`;
+neither is the job item id.)
 `parse` is a guarantee: re-running the exact same invocation is served from
 disk with zero API calls (`--force` re-parses in place); changed params —
 or a moved/edited file — mint a *sibling* job item, so variants coexist and
@@ -199,6 +215,14 @@ On a terminal, `view` opens the viewer in your browser by default
 (`--no-open` suppresses it); `--json` runs and piped output never
 launch a browser — the artifact path is in the output either way.
 Without a JOB_ITEM_ID, `view` targets the latest viewable job item.
+URL-parsed items have no local document bytes, so on first `view` or
+`crop` the CLI fetches a copy of the document into the job item
+automatically — announced on stderr with a progress line, plain HTTP,
+no API credits (`--no-download` skips the fetch; previews then stay
+empty). Note pre-signed URLs expire, so `parse --keep-copy` at parse
+time is the reliable way to secure the bytes. Previews and crops render
+from the attached copy with an "unverified against the parsed run"
+caveat.
 
 Every job item gets a **self-contained `view.html`**: page images with
 bounding-box overlays beside the parsed markdown (or extraction JSON),
@@ -223,13 +247,20 @@ loads the rest on demand from sidecar files rendered into the store.
 | command | what it does |
 |---|---|
 | `ade history` | defaults to `ade history list` |
-| `ade history list` | one row per job item: id, kind, state, params, source |
+| `ade history list` | one row per job item: id, kind, state, params, source — newest 100, newest first |
+| `ade history list --asc` | the same newest items, oldest first |
+| `ade history list --all` | every stored job item, no cap (`--limit N` picks another cap) |
 | `ade history list --json` | full records (params verbatim, timestamps, linkage) |
 | `ade history clear JOB_ITEM_ID` | delete an item; clearing a parse cascades to its extracts |
 | `ade history clear --all` | delete every stored job item |
 
 The read model over the store — zero API calls; states derive from tickets
-and artifacts on disk. Extract items referencing a parse render as indented
+and artifacts on disk. Listings show the newest 100 submissions, newest
+first (the run you just did leads, matching the viewer sidebar) — a
+capped listing says so in its first line; `--limit N` adjusts the cap,
+`--all` lifts it, and `--asc` presents the same items oldest-first, in
+`--json` too. Extract items
+referencing a parse render as indented
 child rows beneath it; an extraction whose parse was re-run in place with
 `--force` is marked **stale** (listing annotation, `"stale": true` in
 `--json`, and an amber mark with a hover tooltip in the viewer sidebar) —

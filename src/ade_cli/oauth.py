@@ -12,7 +12,10 @@ Logto specifics encoded here: ``prompt=consent`` + ``offline_access`` are
 what earns a refresh token; refresh tokens rotate on every use (so refresh
 holds a cross-process lock and re-reads before spending one); and a JWT
 access token bound to the ADE API audience requires the RFC 8707
-``resource`` indicator — without it Logto mints an opaque token.
+``resource`` indicator — without it Logto mints an opaque token. That
+last rule is why organization discovery (ADR-0009) spends a refresh with
+no resource: only the opaque token is welcome at userinfo, where the
+organization claims live.
 """
 
 from __future__ import annotations
@@ -36,7 +39,10 @@ from .config import ENVIRONMENTS, ResolvedConfig, load_config
 from .gateway import BearerAuth, GatewayError, StaticBearer
 from .ports import Clock, Ports
 
-SCOPES = "openid profile email offline_access"
+# urn:logto:scope:organizations makes userinfo return the user's
+# organization memberships (the ``organizations`` / ``organization_data``
+# claims) — the discovery behind the login org picker (ADR-0009).
+SCOPES = "openid profile email offline_access urn:logto:scope:organizations"
 LOGIN_TIMEOUT_SECONDS = 300.0
 EXPIRY_SKEW_SECONDS = 60.0  # refresh this close to expiry, not at it
 _POLL_TICK_SECONDS = 0.2
@@ -81,6 +87,10 @@ class Provider:
     @property
     def revocation_endpoint(self) -> str:
         return f"{self.issuer}/token/revocation"
+
+    @property
+    def userinfo_endpoint(self) -> str:
+        return f"{self.issuer}/me"
 
 
 def resolve_provider(home: Path, environment: str) -> Provider:
@@ -281,7 +291,19 @@ def _post_token(
         except (json.JSONDecodeError, AttributeError):
             detail = response.text
         raise _TokenEndpointError(response.status_code, str(detail))
-    return response.json()
+    # A 200 whose body is not a JSON object is still a broken answer, and
+    # every caller translates _TokenEndpointError into its own flow's
+    # failure — so normalizing here is what keeps a malformed response
+    # from escaping as a decode error nobody catches.
+    try:
+        payload = response.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise _TokenEndpointError(200, f"response body was not JSON: {error}") from error
+    if not isinstance(payload, dict):
+        raise _TokenEndpointError(
+            200, f"response body was {type(payload).__name__}, not a JSON object"
+        )
+    return payload
 
 
 def _entry_from(payload: dict, *, clock: Clock, previous: dict | None) -> dict:
@@ -289,7 +311,7 @@ def _entry_from(payload: dict, *, clock: Clock, previous: dict | None) -> dict:
     if not access_token:
         raise _TokenEndpointError(200, "response carried no access_token")
     expires_in = float(payload.get("expires_in") or 3600.0)
-    return {
+    entry = {
         "access_token": access_token,
         # Rotation: Logto invalidates the spent refresh token; when a
         # response omits a new one (spec-legal), the previous stays valid.
@@ -298,6 +320,12 @@ def _entry_from(payload: dict, *, clock: Clock, previous: dict | None) -> dict:
         "expires_at": clock.now() + expires_in,
         "identity": _identity(payload) or (previous or {}).get("identity") or {},
     }
+    # The org selection is CLI state, never in a token response — it
+    # survives every refresh until set_organization changes it.
+    organization = (previous or {}).get("organization")
+    if organization:
+        entry["organization"] = organization
+    return entry
 
 
 def _identity(payload: dict) -> dict | None:
@@ -313,6 +341,149 @@ def _identity(payload: dict) -> dict | None:
     except (IndexError, ValueError):
         return None
     return {k: claims[k] for k in ("sub", "email", "name") if claims.get(k)}
+
+
+class OrgDiscoveryError(Exception):
+    """Organization discovery or selection failed; ``reason`` is
+    machine-readable. Never raised by the login flow itself — callers
+    decide whether a failure blocks (an explicit --org) or degrades to
+    the platform default (the automatic post-login pick)."""
+
+    def __init__(self, reason: str, message: str):
+        super().__init__(message)
+        self.reason = reason
+        self.message = message
+
+
+def fetch_organizations(home: Path, environment: str, ports: Ports) -> list[dict]:
+    """The stored session's Logto organization memberships, as
+    ``[{"id", "name"}, ...]`` from the userinfo claims (ADR-0009).
+
+    The stored access token is audience-bound to the ADE API (RFC 8707),
+    which userinfo rejects, so this spends one refresh WITHOUT the
+    resource indicator to mint a userinfo-capable token. The rotated
+    refresh token is persisted under the cross-process lock; the stored
+    API access token (still live) is left untouched. Raises
+    OrgDiscoveryError; never changes the stored selection."""
+    provider = resolve_provider(home, environment)
+    if not provider.client_id:
+        raise OrgDiscoveryError(
+            "not_configured", f"OAuth is not configured for {environment}"
+        )
+    with credentials.refresh_lock(home):
+        stored = credentials.load_stored(home) or {}
+        entry = credentials.oauth_entry(
+            (stored.get("environments") or {}).get(environment)
+        )
+        if entry is None:
+            raise OrgDiscoveryError(
+                "no_session", "no OAuth session is stored for this environment"
+            )
+        refresh_token = entry.get("refresh_token")
+        if not refresh_token:
+            raise OrgDiscoveryError(
+                "no_refresh_token", "the stored session has no refresh token"
+            )
+        try:
+            payload = _post_token(
+                ports.transport,
+                provider,
+                {
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                    "client_id": provider.client_id,
+                },
+            )
+        except _TokenEndpointError as error:
+            raise OrgDiscoveryError("token_endpoint", str(error)) from error
+        except httpx.HTTPError as error:
+            raise OrgDiscoveryError(
+                "unreachable", f"could not reach the login provider ({error})"
+            ) from error
+        if payload.get("refresh_token"):
+            credentials.store_oauth(
+                home,
+                environment,
+                {**entry, "refresh_token": payload["refresh_token"]},
+            )
+    userinfo_token = payload.get("access_token")
+    if not userinfo_token:
+        raise OrgDiscoveryError(
+            "token_endpoint", "refresh response carried no access_token"
+        )
+    try:
+        with httpx.Client(
+            transport=ports.transport, timeout=_TOKEN_TIMEOUT_SECONDS
+        ) as client:
+            response = client.get(
+                provider.userinfo_endpoint,
+                headers={"Authorization": f"Bearer {userinfo_token}"},
+            )
+    except httpx.HTTPError as error:
+        raise OrgDiscoveryError(
+            "unreachable", f"could not reach the login provider ({error})"
+        ) from error
+    if response.status_code != 200:
+        raise OrgDiscoveryError(
+            "userinfo", f"userinfo answered {response.status_code}"
+        )
+    try:
+        claims = response.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise OrgDiscoveryError(
+            "userinfo", f"userinfo body was not JSON: {error}"
+        ) from error
+    if not isinstance(claims, dict):
+        raise OrgDiscoveryError(
+            "userinfo",
+            f"userinfo body was {type(claims).__name__}, not a JSON object",
+        )
+    if "organizations" not in claims:
+        # The refresh token predates the organizations scope: userinfo
+        # omits the claim entirely (an empty membership list would be []).
+        raise OrgDiscoveryError(
+            "relogin_required",
+            "this session predates organization support — log out and back in",
+        )
+    memberships = claims.get("organizations") or []
+    if not isinstance(memberships, list):
+        raise OrgDiscoveryError(
+            "userinfo", "userinfo carried a malformed organizations claim"
+        )
+    named = {
+        item.get("id"): item
+        for item in claims.get("organization_data") or []
+        if isinstance(item, dict) and item.get("id")
+    }
+    return [
+        {"id": org_id, "name": (named.get(org_id) or {}).get("name") or org_id}
+        for org_id in memberships
+        if isinstance(org_id, str) and org_id
+    ]
+
+
+def set_organization(home: Path, environment: str, organization: dict | None) -> None:
+    """Persist the org selection on the stored OAuth session (None
+    clears it). The selection rides ``x-org-id`` on API requests, where
+    the platform verifies membership per request (ADR-0009)."""
+    with credentials.refresh_lock(home):
+        stored = credentials.load_stored(home) or {}
+        entry = credentials.oauth_entry(
+            (stored.get("environments") or {}).get(environment)
+        )
+        if entry is None:
+            raise OrgDiscoveryError(
+                "no_session", "no OAuth session is stored for this environment"
+            )
+        entry = dict(entry)
+        if organization is None:
+            entry.pop("organization", None)
+        else:
+            entry["organization"] = {
+                "id": organization["id"],
+                "name": organization.get("name") or organization["id"],
+            }
+        credentials.store_oauth(home, environment, entry)
 
 
 def revoke_stored(home: Path, transport: httpx.BaseTransport) -> int:
