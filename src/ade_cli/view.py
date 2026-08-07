@@ -970,18 +970,18 @@ def view(
     crop: bool = typer.Option(
         False,
         "--crop",
-        help="With --element-id: render that element's PNG crop instead of "
+        help="With `--element-id`: render that element's PNG crop instead of "
         "the HTML artifact.",
     ),
     open_browser: bool | None = typer.Option(
         None,
         "--open/--no-open",
         help="Open the result in the browser. Default: open when stdout is "
-        "a terminal; --json runs and piped output never auto-open.",
+        "a terminal; `--json` runs and piped output never auto-open.",
     ),
     dpi: int | None = typer.Option(
         None, "--dpi", min=1,
-        help=f"Page render dpi (default {DEFAULT_DPI}); with --crop, the crop "
+        help=f"Page render dpi (default {DEFAULT_DPI}); with `--crop`, the crop "
         f"dpi (default {DEFAULT_CROP_DPI}).",
     ),
     pages: str | None = typer.Option(
@@ -991,10 +991,10 @@ def view(
         None, "--download/--no-download",
         help="URL-parsed items: fetch the document from its recorded URL "
         "into the job item and render page previews from that copy — "
-        "the parse itself never gives the CLI the bytes (#169). This "
+        "the parse itself never gives the CLI the bytes. This "
         "happens automatically when no copy is attached yet (a notice "
-        "and progress line land on stderr); --no-download skips the "
-        "fetch and previews stay empty. Explicit --download makes a "
+        "and progress line land on stderr); `--no-download` skips the "
+        "fetch and previews stay empty. Explicit `--download` makes a "
         "failed fetch an error instead of a warning. Plain HTTP, no API "
         "credits; the copy is unverified against the parsed run. Also "
         "works on an extract item id (fetches into its referenced parse "
@@ -1009,11 +1009,11 @@ def view(
         help="Open via a local server (http://127.0.0.1) instead of file:// "
         "— browser zoom then covers every viewer natively. Starts the "
         "server if needed; reuses a running one. It retires itself after "
-        "30 idle minutes, or immediately with --stop-server.",
+        "30 idle minutes, or immediately with `--stop-server`.",
     ),
     stop_server: bool = typer.Option(
         False, "--stop-server",
-        help="Stop the local viewer server (started by --serve) and exit.",
+        help="Stop the local viewer server (started by `--serve`) and exit.",
     ),
     sync_viewers: bool = typer.Option(
         False, "--sync-viewers", hidden=True,

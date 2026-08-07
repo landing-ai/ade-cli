@@ -46,7 +46,7 @@ LIMIT_FLAG = typer.Option(
     "--limit",
     min=1,
     help=f"Keep only the newest N items (default {DEFAULT_LIST_LIMIT}), "
-    "whatever the order; --all lifts the cap.",
+    "whatever the order; `--all` lifts the cap.",
 )
 LIST_ALL_FLAG = typer.Option(
     False, "--all", help="List every stored job item — no limit."
@@ -140,7 +140,7 @@ def list_items(
     as_json: bool = JSON_FLAG,
 ) -> None:
     """List stored job items: id, kind, state, env, params, source —
-    the newest 100 submissions first (--limit/--all adjust, --asc for
+    the newest 100 submissions first (`--limit`/`--all` adjust, `--asc` for
     oldest first). Extract items referencing a parse item indent
     beneath it. Bare `ade history` defaults to this command."""
     jobs = store.JobStore(ade_home())

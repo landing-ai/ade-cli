@@ -194,11 +194,11 @@ RESULTS: dict[str, dict] = {
             ("stored", "false when the result could not be persisted"),
             ("store_dir", "absolute path of the job item folder"),
             ("artifacts", "artifact filenames written there"),
-            ("markdown", "the parse markdown — only with --include markdown"),
-            ("elements", "the flat projection — only with --include elements"),
-            ("kept_copy", "with --keep-copy: whether the URL document's "
+            ("markdown", "the parse markdown — only with `--include markdown`"),
+            ("elements", "the flat projection — only with `--include elements`"),
+            ("kept_copy", "with `--keep-copy`: whether the URL document's "
              "copy was stored in the job item"),
-            ("keep_copy_error", "with --keep-copy: why the copy could not "
+            ("keep_copy_error", "with `--keep-copy`: why the copy could not "
              "be stored (the parse itself still succeeded)"),
         ],
     },
@@ -240,7 +240,7 @@ RESULTS: dict[str, dict] = {
             ("text", "the element's markdown slice"),
         ],
         "note": "One record per match, in document order; [] when nothing "
-        "matched. --id-only prints the element ids alone.",
+        "matched. `--id-only` prints the element ids alone.",
     },
     "crop": {
         "shape": "object",
@@ -255,28 +255,28 @@ RESULTS: dict[str, dict] = {
              "document into the parse item before cropping (absent when "
              "nothing needed fetching)"),
         ],
-        "note": "One shape whatever matched: a single --element-id is "
-        "count 1 with one crops[] record; a filter (--type/--page/--all) "
+        "note": "One shape whatever matched: a single `--element-id` is "
+        "count 1 with one crops[] record; a filter (`--type`/`--page`/`--all`) "
         "matching nothing is count 0 with crops [].",
     },
     "view": {
         "shape": "object",
         "keys": [
-            ("status", "'viewed' ('cropped' with --crop, 'synced' with --sync-viewers)"),
+            ("status", "'viewed' ('cropped' with `--crop`, 'synced' with `--sync-viewers`)"),
             ("job_item_id", "the item rendered"),
             ("kind", "parse | extract"),
-            ("path", "the self-contained view.html (or the PNG, with --crop)"),
+            ("path", "the self-contained view.html (or the PNG, with `--crop`)"),
             ("built", "true when this run rebuilt the artifact"),
             ("pages_embedded", "pages inlined; the rest load from sidecars"),
             ("note", "why the render weakened, when it did (else null)"),
             ("downloaded", "URL items: true when this run fetched the "
              "document into the job item (automatic on first view). false "
              "when the automatic fetch failed (see download_error) or "
-             "explicit --download found the copy already attached; absent "
+             "explicit `--download` found the copy already attached; absent "
              "when nothing needed fetching"),
             ("download_error", "why the automatic fetch failed, when it "
              "did (the viewer still builds, previews empty; else absent)"),
-            ("deep_link", "view.html#element=... when --element-id was given"),
+            ("deep_link", "view.html#element=... when `--element-id` was given"),
             ("history_items", "items in the rebuilt sidebar read model"),
             ("sidebar_sync", "true when sibling viewers build in the background"),
         ],
@@ -293,14 +293,14 @@ RESULTS: dict[str, dict] = {
             ("parse", "extract items: the referenced parse — {job_item_id, "
              "run_id (the parse generation extracted against), missing}"),
             ("stale", "extract items: true when the referenced parse was "
-             "--force re-run after this extraction"),
+             "`--force` re-run after this extraction"),
             ("created_at / completed_at", "epoch seconds (null when unknown)"),
         ],
         "note": "Ordered newest submission first (timestamp-less items "
-        "last), matching the viewer sidebar; --asc restores oldest-first. "
-        "Capped at the newest 100 items by default — --limit N adjusts, "
-        "--all lifts the cap, and a capped run says so up front (the "
-        "first line of the listing; on stderr for --json). The --json "
+        "last), matching the viewer sidebar; `--asc` restores oldest-first. "
+        "Capped at the newest 100 items by default — `--limit` N adjusts, "
+        "`--all` lifts the cap, and a capped run says so up front (the "
+        "first line of the listing; on stderr for `--json`). The `--json` "
         "array follows the same order and cap.",
     },
     "history clear": {
@@ -376,7 +376,7 @@ RESULTS: dict[str, dict] = {
             ("cleared", "false when there was nothing stored to clear"),
             ("revoked", "refresh tokens revoked best-effort"),
             ("scope", "environment | all"),
-            ("environment", "the environment cleared (null with --all)"),
+            ("environment", "the environment cleared (null with `--all`)"),
         ],
     },
     "version": {
@@ -455,7 +455,7 @@ EXIT_STATES = [
 CONVENTIONS = [
     (
         "--json",
-        "Every command supports --json: one stable JSON object/array on "
+        "Every command supports `--json`: one stable JSON object/array on "
         "stdout (errors and pending payloads follow the same rule). Agents "
         "should always pass it. Each command's published shape is its "
         "'result' block below — the full result is always on stdout, never "
@@ -463,8 +463,8 @@ CONVENTIONS = [
     ),
     (
         "--id-only",
-        "parse, extract, and find also take --id-only: just the id(s), one "
-        "per line, for piping (JOB=$(ade parse -d f.pdf --id-only)). Errors "
+        "parse, extract, and find also take `--id-only`: just the id(s), one "
+        "per line, for piping (`JOB=$(ade parse -d f.pdf --id-only)`). Errors "
         "and hints go to stderr so a captured id is never a sentence.",
     ),
     (
@@ -472,7 +472,7 @@ CONVENTIONS = [
         "Store commands take a job item id or an unambiguous prefix. "
         "Discover ids with `history list`; ambiguous or unknown ids error "
         "with candidates listed. Distinct from the server-side run id: "
-        "--json payloads report that as run_id, and on-disk records spell "
+        "`--json` payloads report that as run_id, and on-disk records spell "
         "the same value job_id (the wire's name) — neither is ever a "
         "job item id.",
     ),
@@ -480,7 +480,7 @@ CONVENTIONS = [
         "guarantees",
         "parse and extract ensure a run exists rather than fire a request: "
         "an already-done run is served from disk free with an explicit "
-        "notice (--force consents to a re-bill); a pending run is resumed, "
+        "notice (`--force` consents to a re-bill); a pending run is resumed, "
         "never resubmitted; Ctrl-C stops the waiting, not the work.",
     ),
     (
@@ -516,7 +516,7 @@ STORE_LAYOUT = [
         "path": "  meta.json",
         "what": "commit record: kind, source, identity, params, state, "
         "timestamps, artifact index. Its job_id field is the server-side "
-        "run id (= run_id in --json payloads), never the job item id",
+        "run id (= run_id in `--json` payloads), never the job item id",
     },
     {
         "path": "  job.json",
@@ -757,7 +757,7 @@ def help_command(
     """Print the whole-surface command reference in one call: every
     command and flag, the output convention, each verb's result shape,
     exit states, and the store layout. The agent bootstrap — run this
-    (with --json) before anything else. `help TOPIC` prints one
+    (with `--json`) before anything else. `help TOPIC` prints one
     conceptual page instead (workflow, output, credentials, errors)."""
     root = ctx.find_root().command
     assert isinstance(root, TyperGroup)
