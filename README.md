@@ -88,8 +88,10 @@ it — a mistyped key fails right at login, not at your first `parse`.
 If your account belongs to one organization, browser sign-in selects it
 automatically; if it belongs to several, the login asks (or takes
 `--org`), and `ade auth org switch` changes it any time without a
-browser round-trip. API keys belong to an organization already, so none
-of this applies to them.
+browser round-trip. Requests run — and bill — in the selected
+organization. An API key needs no selection and accepts none: it acts
+in the organization it was created in, so to work in a different
+organization with keys, create a key there and log in with that one.
 
 **There is no "current environment" — the target is resolved fresh on every
 command**: the `--env` flag, else the `ADE_ENV` variable, else `production`.

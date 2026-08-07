@@ -145,8 +145,10 @@ TOPICS: list[dict] = [
             "membership selects itself; several prompt at login (or take",
             "--org). `ade auth org list` shows the memberships live, and",
             "`ade auth org switch <org>` changes the selection without a",
-            "re-login. No selection means the platform default applies. API",
-            "keys are already organization-bound — none of this applies.",
+            "re-login. Requests run — and bill — in the selected",
+            "organization; none selected means the platform default applies.",
+            "An API key needs no selection and accepts none: it acts in the",
+            "organization it was created in.",
         ],
     },
     {

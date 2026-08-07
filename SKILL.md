@@ -23,7 +23,13 @@ Prefer it over N `--help` round trips. `ade help workflow` (also
 `output`, `credentials`, `errors`) is the conceptual page behind it.
 Check credentials with `ade auth status --json`; if logged out, set
 `ADE_API_KEY`, or pipe a key in (`echo $KEY | ade auth login`) — no
-terminal required either way.
+terminal required either way. An API key acts in the organization it
+was created in; browser (OAuth) sessions carry their own selection —
+`status` reports it, `ade auth org list --json` shows the memberships,
+and `ade auth org switch <org> --env <env>` changes it. If a run must
+bill to a specific organization, confirm the selection *before*
+parsing: re-running the same invocation after a switch joins the
+recorded run instead of re-billing under the new organization.
 
 ## Conventions
 
