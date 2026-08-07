@@ -198,7 +198,7 @@
     {
       "name": "auth org list",
       "usage": "ade auth org list [options] [--json]",
-      "summary": "List the organizations the target's OAuth session can act in,\nmarking the selected one. Memberships come live from the login\nprovider, so a fresh grant or removal shows immediately.",
+      "summary": "List the organizations the target's OAuth session can act in,\nmarking the selected one. Memberships come live from the login\nprovider, so a fresh grant or removal shows immediately \u2014 including a\nselection that is no longer a membership.",
       "arguments": [],
       "flags": [
         {
@@ -220,6 +220,10 @@
           {
             "key": "selected",
             "what": "the selected organization id (null when the platform default applies)"
+          },
+          {
+            "key": "selected_is_stale",
+            "what": "true when the selection is no longer one of your memberships \u2014 requests still send it and the platform rejects them; switch or clear"
           },
           {
             "key": "environment",
@@ -264,6 +268,44 @@
           {
             "key": "stored",
             "what": "always true on success"
+          },
+          {
+            "key": "environment",
+            "what": "the resolved target"
+          }
+        ]
+      },
+      "band": "credentials & CLI lifecycle"
+    },
+    {
+      "name": "auth org clear",
+      "usage": "ade auth org clear [options] [--json]",
+      "summary": "Drop the target's organization selection, falling back to the\nplatform default. Idempotent, and deliberately offline: this is the\nway out when a selection has outlived its membership, which is\nexactly when listing memberships may not work.",
+      "arguments": [],
+      "flags": [
+        {
+          "flags": "--env",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "organization",
+            "what": "always null \u2014 the platform default now applies"
+          },
+          {
+            "key": "previous",
+            "what": "the selection that was dropped (null if none)"
+          },
+          {
+            "key": "cleared",
+            "what": "false when there was nothing selected"
           },
           {
             "key": "environment",
@@ -1356,9 +1398,11 @@
         "",
         "Browser (OAuth) logins act in one Logto organization: a single",
         "membership selects itself; several prompt at login (or take",
-        "--org). `ade auth org list` shows the memberships live, and",
+        "--org). `ade auth org list` shows the memberships live (and",
+        "flags a selection that is no longer one of them),",
         "`ade auth org switch <org>` changes the selection without a",
-        "re-login. Requests run \u2014 and bill \u2014 in the selected",
+        "re-login, and `ade auth org clear` falls back to the platform",
+        "default. Requests run \u2014 and bill \u2014 in the selected",
         "organization; none selected means the platform default applies.",
         "An API key needs no selection and accepts none: it acts in the",
         "organization it was created in."

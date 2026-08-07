@@ -382,9 +382,19 @@ def _emit_already(
         identity = cred.oauth.get("identity") or {}
         who = identity.get("email") or identity.get("sub") or "unknown identity"
         payload["identity"] = identity
+        # The published `auth login` shape promises `organization` on every
+        # OAuth result, so the no-op path carries it too — null included,
+        # since agents read the shape rather than discovering it.
+        organization = cred.oauth.get("organization") or None
+        payload["organization"] = organization
+        org_note = (
+            _org_label(organization)
+            if organization
+            else "platform default (none selected)"
+        )
         human = (
             f"Already authenticated for the {resolved.environment} environment "
-            f"as {who}; nothing to do.\n{tail}"
+            f"as {who}; nothing to do.\nOrganization: {org_note}\n{tail}"
         )
     else:
         human = (
@@ -414,15 +424,21 @@ def _browser_login(
     )
 
 
+def _org_env_suffix(resolved: ResolvedConfig) -> str:
+    """`--env X` for a non-default target, mirroring login_hint's rule."""
+    if resolved.environment != DEFAULT_ENVIRONMENT:
+        return f" --env {resolved.environment}"
+    return ""
+
+
 def _org_switch_hint(resolved: ResolvedConfig) -> str:
-    """The `auth org switch` invocation for *this* target, mirroring
-    login_hint's --env rule."""
-    suffix = (
-        f" --env {resolved.environment}"
-        if resolved.environment != DEFAULT_ENVIRONMENT
-        else ""
-    )
-    return f"ade auth org switch <org>{suffix}"
+    """The `auth org switch` invocation for *this* target."""
+    return f"ade auth org switch <org>{_org_env_suffix(resolved)}"
+
+
+def _org_clear_hint(resolved: ResolvedConfig) -> str:
+    """The `auth org clear` invocation for *this* target."""
+    return f"ade auth org clear{_org_env_suffix(resolved)}"
 
 
 def _select_org_after_login(
@@ -949,7 +965,8 @@ def org_list(
 ) -> None:
     """List the organizations the target's OAuth session can act in,
     marking the selected one. Memberships come live from the login
-    provider, so a fresh grant or removal shows immediately."""
+    provider, so a fresh grant or removal shows immediately — including a
+    selection that is no longer a membership."""
     home = ade_home()
     ports: Ports = ctx.obj
     resolved = resolve_target(home, environment, as_json=as_json)
@@ -960,28 +977,35 @@ def org_list(
         {**organization, "selected": organization["id"] == selected_id}
         for organization in organizations
     ]
+    # A selection can outlive the membership behind it (removed from the
+    # org, org deleted). The header keeps going out until it is changed,
+    # and the platform rejects it — so say so instead of reporting a
+    # default that is not what requests actually carry.
+    stale = selected_id is not None and not any(row["selected"] for row in rows)
+    lines = [f"{'*' if row['selected'] else ' '} {_org_label(row)}" for row in rows]
     if not rows:
-        human = (
-            "Your account belongs to no organizations; requests use the "
-            "platform default."
+        lines = ["Your account belongs to no organizations."]
+    if stale:
+        lines.append(
+            f"Selected organization {selected_id} is no longer one of your "
+            f"memberships: requests still send it and the platform will "
+            f"reject them. Pick another with `{_org_switch_hint(resolved)}`, "
+            f"or fall back to the platform default with "
+            f"`{_org_clear_hint(resolved)}`."
         )
-    else:
-        lines = [
-            f"{'*' if row['selected'] else ' '} {_org_label(row)}" for row in rows
-        ]
-        human = "\n".join(lines)
-        if selected_id is None:
-            human = (
-                f"{human}\nNo organization selected; the platform default "
-                f"applies. Select one with `{_org_switch_hint(resolved)}`."
-            )
+    elif selected_id is None:
+        lines.append(
+            "No organization selected; the platform default applies."
+            + (f" Select one with `{_org_switch_hint(resolved)}`." if rows else "")
+        )
     emit(
         {
             "environment": resolved.environment,
             "organizations": rows,
             "selected": selected_id,
+            "selected_is_stale": stale,
         },
-        human,
+        "\n".join(lines),
         as_json=as_json,
     )
 
@@ -1020,6 +1044,40 @@ def org_switch(
             "organization": organization,
             "previous": previous,
             "stored": True,
+        },
+        human,
+        as_json=as_json,
+    )
+
+
+@org_app.command("clear")
+def org_clear(
+    ctx: typer.Context,
+    environment: str | None = typer.Option(None, "--env", help=_ENV_HELP),
+    as_json: bool = JSON_FLAG,
+) -> None:
+    """Drop the target's organization selection, falling back to the
+    platform default. Idempotent, and deliberately offline: this is the
+    way out when a selection has outlived its membership, which is
+    exactly when listing memberships may not work."""
+    home = ade_home()
+    resolved = resolve_target(home, environment, as_json=as_json)
+    entry = _require_oauth_session(home, resolved, as_json=as_json)
+    previous = entry.get("organization") or None
+    oauth.set_organization(home, resolved.environment, None)
+    human = (
+        f"Cleared the organization selection for the {resolved.environment} "
+        f"environment ({_org_label(previous)} → platform default)."
+        if previous
+        else f"No organization was selected for the {resolved.environment} "
+        "environment; nothing to do."
+    )
+    emit(
+        {
+            "environment": resolved.environment,
+            "organization": None,
+            "previous": previous,
+            "cleared": previous is not None,
         },
         human,
         as_json=as_json,

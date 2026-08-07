@@ -51,6 +51,7 @@ BANDS: list[tuple[str, list[str]]] = [
             "auth logout",
             "auth org list",
             "auth org switch",
+            "auth org clear",
             "login",
             "logout",
             "version",
@@ -143,9 +144,11 @@ TOPICS: list[dict] = [
             "",
             "Browser (OAuth) logins act in one Logto organization: a single",
             "membership selects itself; several prompt at login (or take",
-            "--org). `ade auth org list` shows the memberships live, and",
+            "--org). `ade auth org list` shows the memberships live (and",
+            "flags a selection that is no longer one of them),",
             "`ade auth org switch <org>` changes the selection without a",
-            "re-login. Requests run — and bill — in the selected",
+            "re-login, and `ade auth org clear` falls back to the platform",
+            "default. Requests run — and bill — in the selected",
             "organization; none selected means the platform default applies.",
             "An API key needs no selection and accepts none: it acts in the",
             "organization it was created in.",
@@ -342,6 +345,9 @@ RESULTS: dict[str, dict] = {
              "provider: [{id, name, selected}]"),
             ("selected", "the selected organization id (null when the "
              "platform default applies)"),
+            ("selected_is_stale", "true when the selection is no longer one "
+             "of your memberships — requests still send it and the platform "
+             "rejects them; switch or clear"),
             ("environment", "the resolved target"),
         ],
     },
@@ -351,6 +357,15 @@ RESULTS: dict[str, dict] = {
             ("organization", "the selection now stored ({id, name})"),
             ("previous", "the selection it replaced (null if none)"),
             ("stored", "always true on success"),
+            ("environment", "the resolved target"),
+        ],
+    },
+    "auth org clear": {
+        "shape": "object",
+        "keys": [
+            ("organization", "always null — the platform default now applies"),
+            ("previous", "the selection that was dropped (null if none)"),
+            ("cleared", "false when there was nothing selected"),
             ("environment", "the resolved target"),
         ],
     },

@@ -5,3 +5,4 @@ __pycache__/
 dist/
 build/
 .claude/settings.local.json
+*.log

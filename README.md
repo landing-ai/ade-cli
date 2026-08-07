@@ -73,6 +73,7 @@ stderr; set `ADE_NO_UPDATE_CHECK=1` to turn that off.
 | `ade auth status` | the resolved target + every other environment holding a credential |
 | `ade auth org list` | your organizations, live, marking the selected one |
 | `ade auth org switch acme` | act in a different organization — no re-login needed |
+| `ade auth org clear` | drop the selection, falling back to the platform default |
 | `ade auth logout` | log out of the resolved target |
 | `ade auth logout --env eu` | log out of a specific environment |
 | `ade auth logout --all` | log out of every environment |

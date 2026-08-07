@@ -291,7 +291,19 @@ def _post_token(
         except (json.JSONDecodeError, AttributeError):
             detail = response.text
         raise _TokenEndpointError(response.status_code, str(detail))
-    return response.json()
+    # A 200 whose body is not a JSON object is still a broken answer, and
+    # every caller translates _TokenEndpointError into its own flow's
+    # failure — so normalizing here is what keeps a malformed response
+    # from escaping as a decode error nobody catches.
+    try:
+        payload = response.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise _TokenEndpointError(200, f"response body was not JSON: {error}") from error
+    if not isinstance(payload, dict):
+        raise _TokenEndpointError(
+            200, f"response body was {type(payload).__name__}, not a JSON object"
+        )
+    return payload
 
 
 def _entry_from(payload: dict, *, clock: Clock, previous: dict | None) -> dict:
@@ -415,13 +427,28 @@ def fetch_organizations(home: Path, environment: str, ports: Ports) -> list[dict
         raise OrgDiscoveryError(
             "userinfo", f"userinfo answered {response.status_code}"
         )
-    claims = response.json()
+    try:
+        claims = response.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise OrgDiscoveryError(
+            "userinfo", f"userinfo body was not JSON: {error}"
+        ) from error
+    if not isinstance(claims, dict):
+        raise OrgDiscoveryError(
+            "userinfo",
+            f"userinfo body was {type(claims).__name__}, not a JSON object",
+        )
     if "organizations" not in claims:
         # The refresh token predates the organizations scope: userinfo
         # omits the claim entirely (an empty membership list would be []).
         raise OrgDiscoveryError(
             "relogin_required",
             "this session predates organization support — log out and back in",
+        )
+    memberships = claims.get("organizations") or []
+    if not isinstance(memberships, list):
+        raise OrgDiscoveryError(
+            "userinfo", "userinfo carried a malformed organizations claim"
         )
     named = {
         item.get("id"): item
@@ -430,7 +457,8 @@ def fetch_organizations(home: Path, environment: str, ports: Ports) -> list[dict
     }
     return [
         {"id": org_id, "name": (named.get(org_id) or {}).get("name") or org_id}
-        for org_id in claims.get("organizations") or []
+        for org_id in memberships
+        if isinstance(org_id, str) and org_id
     ]
 
 

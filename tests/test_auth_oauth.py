@@ -12,6 +12,7 @@ import stat
 from urllib.parse import parse_qs, urlparse
 from urllib.request import urlopen
 
+import httpx
 import pytest
 
 from parse_fixtures import completed_job
@@ -1097,3 +1098,241 @@ def test_refresh_preserves_the_org_selection(cli, tmp_path):
     assert submit.headers["x-org-id"] == "org-a"
     entry = stored_environments(cli)["production"]
     assert entry["oauth"]["organization"] == ORG_A
+
+
+# --- Review follow-ups: malformed provider answers, contract parity,
+# --- and a selection that outlived its membership
+
+
+def test_login_survives_a_malformed_discovery_token_response(cli):
+    # Discovery is best-effort by contract (ADR-0009): a token endpoint
+    # answering 200 with a non-JSON body must not cost the login.
+    seed_oauth_config(cli)
+    cli.transport.respond(200, token_response())
+    cli.transport.respond_with(
+        lambda request: httpx.Response(200, content=b"<html>gateway</html>")
+    )
+
+    result = cli.invoke("auth", "login", "--json", browser=ClickAllow())
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["organization"] is None
+    assert "not JSON" in payload["organization_note"]
+    assert stored_environments(cli)["production"]["oauth"]["access_token"] == "at-1"
+
+
+def test_login_survives_a_non_object_discovery_token_response(cli):
+    seed_oauth_config(cli)
+    cli.transport.respond(200, token_response())
+    cli.transport.respond(200, ["not", "an", "object"])
+
+    result = cli.invoke("auth", "login", "--json", browser=ClickAllow())
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["organization"] is None
+    assert stored_environments(cli)["production"]["oauth"]["access_token"] == "at-1"
+
+
+def test_login_survives_a_malformed_userinfo_body(cli):
+    seed_oauth_config(cli)
+    cli.transport.respond(200, token_response())
+    cli.transport.respond(200, token_response(access="opaque-1", refresh="rt-2"))
+    cli.transport.respond_with(
+        lambda request: httpx.Response(200, content=b"not json at all")
+    )
+
+    result = cli.invoke("auth", "login", "--json", browser=ClickAllow())
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["organization"] is None
+    assert "ade auth org switch" in payload["organization_note"]
+    assert stored_environments(cli)["production"]["oauth"]["access_token"] == "at-1"
+
+
+def test_login_survives_a_non_object_userinfo_body(cli):
+    seed_oauth_config(cli)
+    cli.transport.respond(200, token_response())
+    cli.transport.respond(200, token_response(access="opaque-1", refresh="rt-2"))
+    cli.transport.respond(200, ["claims", "should", "be", "an", "object"])
+
+    result = cli.invoke("auth", "login", "--json", browser=ClickAllow())
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["organization"] is None
+
+
+def test_login_survives_a_malformed_organizations_claim(cli):
+    # The claim is present (so not the pre-scope case) but not a list.
+    seed_oauth_config(cli)
+    cli.transport.respond(200, token_response())
+    cli.transport.respond(200, token_response(access="opaque-1", refresh="rt-2"))
+    cli.transport.respond(200, {"sub": "user-1", "organizations": "org-a"})
+
+    result = cli.invoke("auth", "login", "--json", browser=ClickAllow())
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["organization"] is None
+
+
+def test_explicit_org_flag_reports_a_malformed_discovery_answer(cli):
+    # --org asked for a state the login could not reach: that fails
+    # loudly (exit 1) even though the tokens are kept.
+    seed_oauth_config(cli)
+    cli.transport.respond(200, token_response())
+    cli.transport.respond(200, ["not", "an", "object"])
+
+    result = cli.invoke(
+        "auth", "login", "--org", "org-a", "--json", browser=ClickAllow()
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error"].startswith("org_")
+    assert payload["stored"] is True
+    assert stored_environments(cli)["production"]["oauth"]["access_token"] == "at-1"
+
+
+def test_malformed_login_token_response_is_a_clean_failure(cli):
+    # The same normalization guards the login exchange itself: a 200 with
+    # a non-JSON body is a clean LoginError, never a traceback.
+    seed_oauth_config(cli)
+    cli.transport.respond_with(
+        lambda request: httpx.Response(200, content=b"<html>gateway</html>")
+    )
+
+    result = cli.invoke("auth", "login", "--json", browser=ClickAllow())
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error"] == "oauth_token_endpoint"
+    assert not (cli.home / "credentials.json").exists()
+
+
+def test_already_authenticated_login_publishes_the_organization(cli):
+    # The published `auth login` shape promises `organization` on every
+    # OAuth result — the no-op path included.
+    seed_stored_oauth(cli, organization=ORG_A)
+
+    result = cli.invoke("auth", "login", "--json", browser=ClickAllow())
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["already_authenticated"] is True
+    assert payload["organization"] == ORG_A
+    assert cli.transport.requests == []  # still a no-op: no discovery
+
+
+def test_already_authenticated_login_publishes_a_null_organization(cli):
+    seed_stored_oauth(cli)
+
+    result = cli.invoke("auth", "login", "--json", browser=ClickAllow())
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["organization"] is None  # the key is present, not omitted
+
+
+def test_org_list_flags_a_selection_that_lost_its_membership(cli):
+    # Removed from the org (or the org is gone): the header still goes
+    # out, so the listing must say so rather than imply the default.
+    seed_oauth_config(cli)
+    seed_stored_oauth(cli, organization={"id": "org-gone", "name": "Gone"})
+    script_discovery(cli, orgs=[ORG_A, ORG_B])
+
+    result = cli.invoke("auth", "org", "list", "--json")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["selected"] == "org-gone"
+    assert payload["selected_is_stale"] is True
+    assert not any(row["selected"] for row in payload["organizations"])
+
+
+def test_org_list_stale_human_output_names_both_remediations(cli):
+    seed_oauth_config(cli)
+    seed_stored_oauth(cli, organization={"id": "org-gone", "name": "Gone"})
+    script_discovery(cli, orgs=[])
+
+    result = cli.invoke("auth", "org", "list")
+
+    assert result.exit_code == 0, result.output
+    # Never claims the platform default applies while the header persists.
+    assert "no longer one of your memberships" in result.stdout
+    assert "ade auth org switch" in result.stdout
+    assert "ade auth org clear" in result.stdout
+
+
+def test_org_list_live_selection_is_not_stale(cli):
+    seed_oauth_config(cli)
+    seed_stored_oauth(cli, organization=ORG_A)
+    script_discovery(cli, orgs=[ORG_A, ORG_B])
+
+    result = cli.invoke("auth", "org", "list", "--json")
+
+    assert json.loads(result.stdout)["selected_is_stale"] is False
+
+
+def test_org_clear_drops_the_selection_without_discovery(cli):
+    # Deliberately offline: clearing is the way out of a stale selection,
+    # which is exactly when listing memberships may not work.
+    seed_oauth_config(cli)
+    seed_stored_oauth(cli, organization={"id": "org-gone", "name": "Gone"})
+
+    result = cli.invoke("auth", "org", "clear", "--json")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["cleared"] is True
+    assert payload["organization"] is None
+    assert payload["previous"] == {"id": "org-gone", "name": "Gone"}
+    assert cli.transport.requests == []  # no provider round-trip
+    assert "organization" not in stored_environments(cli)["production"]["oauth"]
+
+
+def test_org_clear_is_idempotent(cli):
+    seed_oauth_config(cli)
+    seed_stored_oauth(cli)
+
+    result = cli.invoke("auth", "org", "clear", "--json")
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["cleared"] is False
+    assert payload["previous"] is None
+
+
+def test_org_clear_requires_an_oauth_session(cli):
+    cli.transport.respond(200, {"accepted": 0})  # the verification probe (#117)
+    cli.invoke("auth", "login", "--api-key", KEY)
+
+    result = cli.invoke("auth", "org", "clear", "--json")
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error"] == "org_requires_oauth"
+
+
+def test_cleared_selection_stops_sending_the_header(cli, tmp_path):
+    seed_oauth_config(cli)
+    seed_stored_oauth(cli, organization=ORG_A)
+    cli.invoke("auth", "org", "clear")
+    cli.transport.respond(202, {"job_id": "job-0001", "status": "pending"})
+    cli.transport.respond(200, completed_job())
+
+    result = cli.invoke(*_parse_args(tmp_path))
+
+    assert result.exit_code == 0, result.output
+    assert "x-org-id" not in cli.transport.requests[0].headers
+
+
+def test_stale_selection_still_rides_requests_until_changed(cli, tmp_path):
+    # The honest half of the stale contract: nothing client-side silently
+    # drops the header, which is why `org list` must warn.
+    seed_stored_oauth(cli, organization={"id": "org-gone", "name": "Gone"})
+    cli.transport.respond(202, {"job_id": "job-0001", "status": "pending"})
+    cli.transport.respond(200, completed_job())
+
+    result = cli.invoke(*_parse_args(tmp_path))
+
+    assert result.exit_code == 0, result.output
+    assert cli.transport.requests[0].headers["x-org-id"] == "org-gone"
