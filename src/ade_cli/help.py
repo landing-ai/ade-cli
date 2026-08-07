@@ -297,10 +297,10 @@ RESULTS: dict[str, dict] = {
             ("created_at / completed_at", "epoch seconds (null when unknown)"),
         ],
         "note": "Ordered newest submission first (timestamp-less items "
-        "last), matching the viewer sidebar; --asc restores oldest-first. "
-        "Capped at the newest 100 items by default — --limit N adjusts, "
-        "--all lifts the cap, and a capped run says so up front (the "
-        "first line of the listing; on stderr for --json). The --json "
+        "last), matching the viewer sidebar; `--asc` restores oldest-first. "
+        "Capped at the newest 100 items by default — `--limit` N adjusts, "
+        "`--all` lifts the cap, and a capped run says so up front (the "
+        "first line of the listing; on stderr for `--json`). The `--json` "
         "array follows the same order and cap.",
     },
     "history clear": {
@@ -472,7 +472,7 @@ CONVENTIONS = [
         "Store commands take a job item id or an unambiguous prefix. "
         "Discover ids with `history list`; ambiguous or unknown ids error "
         "with candidates listed. Distinct from the server-side run id: "
-        "--json payloads report that as run_id, and on-disk records spell "
+        "`--json` payloads report that as run_id, and on-disk records spell "
         "the same value job_id (the wire's name) — neither is ever a "
         "job item id.",
     ),
@@ -516,7 +516,7 @@ STORE_LAYOUT = [
         "path": "  meta.json",
         "what": "commit record: kind, source, identity, params, state, "
         "timestamps, artifact index. Its job_id field is the server-side "
-        "run id (= run_id in --json payloads), never the job item id",
+        "run id (= run_id in `--json` payloads), never the job item id",
     },
     {
         "path": "  job.json",

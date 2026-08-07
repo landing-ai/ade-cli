@@ -991,10 +991,10 @@ def view(
         None, "--download/--no-download",
         help="URL-parsed items: fetch the document from its recorded URL "
         "into the job item and render page previews from that copy — "
-        "the parse itself never gives the CLI the bytes (#169). This "
+        "the parse itself never gives the CLI the bytes. This "
         "happens automatically when no copy is attached yet (a notice "
-        "and progress line land on stderr); --no-download skips the "
-        "fetch and previews stay empty. Explicit --download makes a "
+        "and progress line land on stderr); `--no-download` skips the "
+        "fetch and previews stay empty. Explicit `--download` makes a "
         "failed fetch an error instead of a warning. Plain HTTP, no API "
         "credits; the copy is unverified against the parsed run. Also "
         "works on an extract item id (fetches into its referenced parse "

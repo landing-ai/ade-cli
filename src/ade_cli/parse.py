@@ -154,7 +154,7 @@ def parse(
     ),
     keep_copy: bool = typer.Option(
         False, "--keep-copy",
-        help="--document-url only: also download the document into the "
+        help="`--document-url` only: also download the document into the "
         "job item (plain HTTP, no API credits) so page previews and "
         "crops render locally — fetched now, while the URL (often "
         "pre-signed) still works. Without it, the first `view`/`crop` "
