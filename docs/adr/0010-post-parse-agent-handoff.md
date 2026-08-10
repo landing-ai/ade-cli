@@ -45,7 +45,10 @@ ade collects only what it already knows plus the extraction **intent**
 (and optional existing-schema / ground-truth files); per-field accuracy
 targets are deliberately *not* collected — the skill's own intake
 negotiates them in conversation. The seeded prompt carries the full parse
-job item id, source, workspace (`<ade-home>/schema-runs/<slug>-<date>/`
+job item id, source, workspace (`<ade-home>/schema-runs/<slug>-<item-id>-<date>/`
+by default — the item id, a content hash, keys it so two documents that
+share a filename never share a workspace or each other's deliverable,
+while re-running the same document resumes
 by default), and skill-acquisition instructions. When the session ends,
 ade looks for `deliverable/schema.json`, names it, and offers to run the
 extract — a re-exec of this CLI (`update.reexec_argv`, shared with the

@@ -257,7 +257,14 @@ def run_build(
 
     if workspace is None:
         date = datetime.fromtimestamp(ports.clock.now()).strftime("%Y-%m-%d")
-        workspace = home / "schema-runs" / f"{_slug(source)}-{date}"
+        # The item id (a content hash) keys the default workspace, not just
+        # the filename: two different documents both named invoice.pdf must
+        # never share a workspace — a stale deliverable/schema.json from one
+        # would be reported as the other's. Same document re-parsed → same
+        # id → the run resumes, which is the reuse actually wanted.
+        workspace = (
+            home / "schema-runs" / f"{_slug(source)}-{item_id[:8]}-{date}"
+        )
     workspace.mkdir(parents=True, exist_ok=True)
 
     prompt = agents.seeded_prompt(
@@ -370,7 +377,8 @@ def build(
     workspace: Path | None = typer.Option(
         None, "--workspace",
         help="Skill workspace directory (default: "
-        "<ade-home>/schema-runs/<source>-<date>/; an existing one resumes).",
+        "<ade-home>/schema-runs/<source>-<item-id>-<date>/; an existing "
+        "one resumes).",
     ),
     agent_name: str | None = typer.Option(
         None, "--agent",

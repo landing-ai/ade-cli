@@ -927,7 +927,7 @@
           "metavar": "PATH",
           "required": false,
           "default": null,
-          "help": "Skill workspace directory (default: <ade-home>/schema-runs/<source>-<date>/; an existing one resumes)."
+          "help": "Skill workspace directory (default: <ade-home>/schema-runs/<source>-<item-id>-<date>/; an existing one resumes)."
         },
         {
           "flags": "--agent",

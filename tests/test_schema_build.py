@@ -158,7 +158,7 @@ def test_build_launches_the_agent_and_offers_the_extract(tty, document):
     assert argv[0] == "claude" and len(argv) == 2
     assert item_id in argv[1] and "invoice totals" in argv[1]
     assert cwd is not None and re.fullmatch(
-        r"invoice-\d{4}-\d{2}-\d{2}", cwd.name
+        rf"invoice-{item_id[:8]}-\d{{4}}-\d{{2}}-\d{{2}}", cwd.name
     ), cwd
     assert cwd.parent == tty.home / "schema-runs"
     schema_path = cwd / "deliverable" / "schema.json"
@@ -326,6 +326,32 @@ def test_workspace_slug_comes_from_the_source_and_is_reused(tty, document):
     assert first.calls[0][1].name.startswith("invoice-")
 
 
+def test_same_filename_different_documents_get_distinct_workspaces(tty, tmp_path):
+    """Filename stem + date alone would collide two different documents
+    both named invoice.pdf — and the second run would report the first
+    one's stale deliverable as its own. The item id (a content hash) in
+    the default workspace name keeps them apart."""
+    workspaces = []
+    for n, content in enumerate((b"%PDF-1.4 doc one", b"%PDF-1.4 doc two")):
+        doc_dir = tmp_path / f"client-{n}"
+        doc_dir.mkdir()
+        doc = doc_dir / "invoice.pdf"
+        doc.write_bytes(content)
+        tty.transport.respond(202, {"job_id": f"job-{n}"})
+        tty.transport.respond(200, completed_job(job_id=f"job-{n}"))
+        parsed = tty.invoke("parse", "-d", str(doc), "--json", env=AUTH_ENV)
+        assert parsed.exit_code == 0, parsed.stdout
+        item_id = json.loads(parsed.stdout)["job_item_id"]
+        runs = RecordedRuns([deliver_schema])
+        result = tty.invoke(
+            "schema", "build", item_id, "--json", "--intent", "totals",
+            which=CLAUDE, run=runs,
+        )
+        assert result.exit_code == 0, result.stdout
+        workspaces.append(runs.calls[0][1])
+    assert workspaces[0] != workspaces[1]
+
+
 def test_explicit_workspace_is_honored(tty, document, tmp_path):
     item_id = parse_doc(tty, document)
     workspace = tmp_path / "engagement"
@@ -357,7 +383,7 @@ def test_url_sourced_parse_still_yields_a_usable_slug(tty):
     )
     assert result.exit_code == 0, result.stdout
     name = runs.calls[0][1].name
-    assert re.fullmatch(r"[a-z0-9-]+-\d{4}-\d{2}-\d{2}", name), name
+    assert re.fullmatch(r"[a-z0-9-]+-[0-9a-f]{8}-\d{4}-\d{2}-\d{2}", name), name
 
 
 def test_flags_feed_the_prompt_without_prompting(tty, document, tmp_path):
