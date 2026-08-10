@@ -519,3 +519,33 @@ def test_corrupt_config_costs_the_preference_not_the_handoff(tty, document):
     )
     assert result.exit_code == 0, result.stdout
     assert json.loads(result.stdout)["agent"] == "claude"
+
+
+def test_credit_cost_is_stated_before_the_session_starts(tty, document):
+    """The skill bills per iteration, not once — the user must learn that
+    before the agent launches, not from the invoice."""
+    item_id = parse_doc(tty, document)
+    runs = RecordedRuns([deliver_schema])
+    result = tty.invoke(
+        "schema", "build", item_id, "--intent", "totals",
+        which=CLAUDE, run=runs, input="\n\nn\n",
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "bills credits" in result.stderr
+    assert "each iteration" in result.stderr
+
+
+def test_help_warns_that_the_skill_bills_credits(cli):
+    """Both help surfaces carry the cost: the command's own --help and
+    the published result contract agents read."""
+    scoped = cli.invoke("help", "schema build")
+    assert scoped.exit_code == 0
+    assert "Bills credits" in scoped.stdout
+
+    reference = json.loads(cli.invoke("help", "--json").stdout)
+    record = next(
+        c for c in reference["commands"] if c["name"] == "schema build"
+    )
+    assert "BILLS CREDITS" in record["result"]["note"]
+    workflow = next(t for t in reference["topics"] if t["name"] == "workflow")
+    assert any("bills credits" in line for line in workflow["body"])

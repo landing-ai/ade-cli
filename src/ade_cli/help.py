@@ -93,9 +93,12 @@ TOPICS: list[dict] = [
             "            batch by find's own filters (--type figure, --all).",
             "4. schema build   author the extract schema when you don't have",
             "            one: hands the parse to an interactive AI-agent",
-            "            session running the build-schema skill (interactive",
-            "            terminals only — agents should run the skill",
-            "            directly instead).",
+            "            session running the build-schema skill, then offers",
+            "            the extract it delivers. The skill bills credits —",
+            "            it proves each schema version with a real extract",
+            "            run, so expect one extraction per iteration per",
+            "            document (interactive terminals only — agents should",
+            "            run the skill directly instead).",
             "5. extract  ensure a schema extraction exists for a parse job item",
             "            (or bring-your-own markdown). It becomes its own job",
             "            item, referencing the parse — artifacts never copied.",
@@ -402,8 +405,13 @@ RESULTS: dict[str, dict] = {
         ],
         "note": "Interactive terminals only: the command launches a "
         "foreground AI-agent session (claude, codex, or a config-declared "
-        "CLI) seeded with the parse and your intent. Agents should invoke "
-        "the build-schema skill directly instead of calling this.",
+        "CLI) seeded with the parse and your intent — that session runs "
+        "the build-schema skill, which BILLS CREDITS: it validates every "
+        "schema version with a real extract run, so a converging loop "
+        "costs roughly one extraction per iteration per document. The "
+        "extraction offered at the end is normally a free cache hit (the "
+        "last iteration already ran it). Agents should invoke the "
+        "build-schema skill directly instead of calling this.",
     },
     "version": {
         "shape": "object",

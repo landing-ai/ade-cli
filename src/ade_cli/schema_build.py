@@ -271,9 +271,14 @@ def run_build(
         existing_schema=existing_schema,
         ground_truth=ground_truth,
     )
+    # Said here, not only in --help: this is the last moment before the
+    # session starts spending. The skill proves every schema version with
+    # a real extract run, so the loop bills per iteration, not once.
     typer.echo(
         f"Launching {agent.name} in {tilde(workspace)} — the schema loop "
-        "runs in that session; finish it to return here.",
+        "runs in that session; finish it to return here."
+        "\nIt bills credits: each iteration runs a real extraction per "
+        "document (`ade history list` itemises them).",
         err=True,
     )
     try:
@@ -378,6 +383,12 @@ def build(
     an AI-agent session running the build-schema skill (measured
     iteration: real extractions, reviewer verdicts, converged-or-blocked
     stops). Ends by naming the delivered schema and offering the extract.
+
+    Bills credits: the skill validates every schema version with a real
+    `ade extract` run, so a converging loop costs one extraction per
+    iteration per document (the extraction offered at the end is normally
+    a free cache hit — the last iteration already ran it). The session
+    reports what it spent; `ade history list` itemises every run.
     """
     ports: Ports = ctx.obj
     home = ade_home()
