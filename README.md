@@ -165,6 +165,23 @@ JOB=$(ade parse -d doc.pdf --wait 0 --id-only)   # submit and return, exit 3
 ade parse -d doc.pdf --id-only                    # re-run to resume; same id
 ```
 
+## Build a schema
+
+No schema yet? `ade schema build JOB_ITEM_ID` hands a parsed document to
+an AI-agent session running the
+[build-schema skill](https://github.com/landing-ai/claude-skills), which
+authors and validates the schema through real extractions before
+delivering it (an interactive parse also offers this step when it
+finishes). You describe what to extract; the session negotiates accuracy
+targets with you and iterates until the schema converges or is legibly
+blocked. It needs an agent CLI on your PATH — Claude Code (`claude`,
+ideally with the `landingai-ade` plugin) or Codex (`codex`); any other
+agent can be declared in `~/.ade/config.json` as
+`{"agent": {"name": "...", "command": ["..."]}}`. The delivered schema
+lands in the named workspace as `deliverable/schema.json`, ready for
+`ade extract`; set `{"schema_prompt": false}` to silence the post-parse
+offer.
+
 ## Extract
 
 | command | what it does |

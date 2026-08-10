@@ -76,6 +76,15 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def reexec_argv(*command: str) -> list[str]:
+    """argv that re-runs this CLI: a PyInstaller binary (sys.frozen) takes
+    subcommands directly; a normal install goes through ``python -m ade_cli``
+    (the only re-exec an importable package can promise)."""
+    if is_frozen():
+        return [sys.executable, *command]
+    return [sys.executable, "-m", "ade_cli", *command]
+
+
 def install_mode() -> str:
     """How this CLI is installed: ``binary`` (the frozen standalone app —
     self-update replaces it in place) or ``python`` (uv/pipx/pip — an

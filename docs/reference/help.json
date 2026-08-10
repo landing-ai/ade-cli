@@ -890,6 +890,91 @@
       "band": "network verbs \u2014 the ADE job contracts"
     },
     {
+      "name": "schema build",
+      "usage": "ade schema build JOB_ITEM_ID [options] [--json]",
+      "summary": "Build an extraction schema for a parsed document by handing it to\nan AI-agent session running the build-schema skill (measured\niteration: real extractions, reviewer verdicts, converged-or-blocked\nstops). Ends by naming the delivered schema and offering the extract.",
+      "arguments": [
+        {
+          "name": "JOB_ITEM_ID",
+          "required": true,
+          "help": "A completed parse job item id (or unambiguous prefix)."
+        }
+      ],
+      "flags": [
+        {
+          "flags": "--intent",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "What to extract, in plain language (prompted interactively when omitted; required with --json)."
+        },
+        {
+          "flags": "--existing-schema",
+          "metavar": "FILE",
+          "required": false,
+          "default": null,
+          "help": "A schema to improve: the skill runs it unchanged first as the regression floor."
+        },
+        {
+          "flags": "--ground-truth",
+          "metavar": "FILE",
+          "required": false,
+          "default": null,
+          "help": "Golden ground truth seeding the skill's eval set (JSON keyed by document filename, or flat CSV)."
+        },
+        {
+          "flags": "--workspace",
+          "metavar": "PATH",
+          "required": false,
+          "default": null,
+          "help": "Skill workspace directory (default: <ade-home>/schema-runs/<source>-<date>/; an existing one resumes)."
+        },
+        {
+          "flags": "--agent",
+          "metavar": "TEXT",
+          "required": false,
+          "default": null,
+          "help": "Agent CLI to launch (claude, codex, or a config-declared name); default: the configured or only available one."
+        }
+      ],
+      "supports_json": true,
+      "result": {
+        "shape": "object",
+        "keys": [
+          {
+            "key": "status",
+            "what": "'schema_built'"
+          },
+          {
+            "key": "job_item_id",
+            "what": "the parse item the schema was built against"
+          },
+          {
+            "key": "agent",
+            "what": "the agent CLI that hosted the session"
+          },
+          {
+            "key": "workspace",
+            "what": "the skill workspace (eval set, iteration log, dispositions live alongside the schema)"
+          },
+          {
+            "key": "schema",
+            "what": "absolute path of the delivered schema.json"
+          },
+          {
+            "key": "extract_hint",
+            "what": "the ready-to-run extract invocation"
+          },
+          {
+            "key": "extracted",
+            "what": "always false \u2014 the extract run is offered interactively, never performed silently"
+          }
+        ],
+        "note": "Interactive terminals only: the command launches a foreground AI-agent session (claude, codex, or a config-declared CLI) seeded with the parse and your intent. Agents should invoke the build-schema skill directly instead of calling this."
+      },
+      "band": "schema authoring \u2014 the agent handoff"
+    },
+    {
       "name": "history list",
       "usage": "ade history list [options] [--json]",
       "summary": "List stored job items: id, kind, state, env, params, source \u2014\nthe newest 100 submissions first (--limit/--all adjust, --asc for\noldest first). Extract items referencing a parse item indent\nbeneath it. Bare `ade history` defaults to this command.",
@@ -1335,6 +1420,8 @@
       "body": [
         "parse \u2500\u252c\u2500> find \u2500\u2500> crop        look at an element as an image",
         "       \u251c\u2500> view                 grounded page images + markdown",
+        "       \u251c\u2500> schema build         author the extract schema with an",
+        "       \u2502                        AI-agent session (build-schema skill)",
         "       \u2514\u2500> extract \u2500\u2500> view     schema-shaped data, grounded",
         "",
         "1. parse    ensure a document is parsed. Prints a job item id;",
@@ -1344,10 +1431,15 @@
         "            type, page, box, text.",
         "3. crop     render element regions as PNGs: one --element-id, or a",
         "            batch by find's own filters (--type figure, --all).",
-        "4. extract  ensure a schema extraction exists for a parse job item",
+        "4. schema build   author the extract schema when you don't have",
+        "            one: hands the parse to an interactive AI-agent",
+        "            session running the build-schema skill (interactive",
+        "            terminals only \u2014 agents should run the skill",
+        "            directly instead).",
+        "5. extract  ensure a schema extraction exists for a parse job item",
         "            (or bring-your-own markdown). It becomes its own job",
         "            item, referencing the parse \u2014 artifacts never copied.",
-        "5. view     build the self-contained HTML viewer for a parse or an",
+        "6. view     build the self-contained HTML viewer for a parse or an",
         "            extract item; --element-id emits a deep link to one",
         "            element \u2014 the citation contract.",
         "",

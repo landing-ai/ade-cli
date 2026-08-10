@@ -60,6 +60,7 @@ BANDS: list[tuple[str, list[str]]] = [
         ],
     ),
     ("network verbs — the ADE job contracts", ["parse", "extract"]),
+    ("schema authoring — the agent handoff", ["schema build"]),
     (
         "local read models",
         ["history list", "history clear", "find", "view", "crop"],
@@ -79,6 +80,8 @@ TOPICS: list[dict] = [
         "body": [
             "parse ─┬─> find ──> crop        look at an element as an image",
             "       ├─> view                 grounded page images + markdown",
+            "       ├─> schema build         author the extract schema with an",
+            "       │                        AI-agent session (build-schema skill)",
             "       └─> extract ──> view     schema-shaped data, grounded",
             "",
             "1. parse    ensure a document is parsed. Prints a job item id;",
@@ -88,10 +91,15 @@ TOPICS: list[dict] = [
             "            type, page, box, text.",
             "3. crop     render element regions as PNGs: one --element-id, or a",
             "            batch by find's own filters (--type figure, --all).",
-            "4. extract  ensure a schema extraction exists for a parse job item",
+            "4. schema build   author the extract schema when you don't have",
+            "            one: hands the parse to an interactive AI-agent",
+            "            session running the build-schema skill (interactive",
+            "            terminals only — agents should run the skill",
+            "            directly instead).",
+            "5. extract  ensure a schema extraction exists for a parse job item",
             "            (or bring-your-own markdown). It becomes its own job",
             "            item, referencing the parse — artifacts never copied.",
-            "5. view     build the self-contained HTML viewer for a parse or an",
+            "6. view     build the self-contained HTML viewer for a parse or an",
             "            extract item; --element-id emits a deep link to one",
             "            element — the citation contract.",
             "",
@@ -378,6 +386,24 @@ RESULTS: dict[str, dict] = {
             ("scope", "environment | all"),
             ("environment", "the environment cleared (null with --all)"),
         ],
+    },
+    "schema build": {
+        "shape": "object",
+        "keys": [
+            ("status", "'schema_built'"),
+            ("job_item_id", "the parse item the schema was built against"),
+            ("agent", "the agent CLI that hosted the session"),
+            ("workspace", "the skill workspace (eval set, iteration log, "
+             "dispositions live alongside the schema)"),
+            ("schema", "absolute path of the delivered schema.json"),
+            ("extract_hint", "the ready-to-run extract invocation"),
+            ("extracted", "always false — the extract run is offered "
+             "interactively, never performed silently"),
+        ],
+        "note": "Interactive terminals only: the command launches a "
+        "foreground AI-agent session (claude, codex, or a config-declared "
+        "CLI) seeded with the parse and your intent. Agents should invoke "
+        "the build-schema skill directly instead of calling this.",
     },
     "version": {
         "shape": "object",

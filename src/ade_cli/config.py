@@ -6,8 +6,13 @@ wins, then the ``ADE_ENV`` variable (shell-scoped stickiness — two
 terminals can work two environments at once), then production, the
 stable default. ``ADE_ENDPOINT`` overrides the endpoint URL alone (the
 raw escape hatch); credentials still file under the resolved
-environment. ``config.json`` holds only the ``oauth.<environment>``
-provider overrides (see oauth.py); ``ADE_HOME`` relocates the store.
+environment. ``config.json`` holds the ``oauth.<environment>`` provider
+overrides (see oauth.py), the ``update_check`` opt-out (update.py), and
+the schema-handoff keys (schema_build.py): ``agent`` — a remembered
+``{"default": "claude"}`` menu choice or a custom
+``{"name": ..., "command": [...]}`` launcher — and ``schema_prompt:
+false`` to silence the post-parse offer. ``ADE_HOME`` relocates the
+store.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from pathlib import Path
 from typing import Literal
 
 from .output import EXIT_USAGE, exit_with
+from .store import write_atomic
 
 ENVIRONMENTS = {
     "dev": "https://api.ade.dev.landing.ai",
@@ -50,6 +56,14 @@ def load_config(home: Path) -> dict:
     if not path.exists():
         return {}
     return json.loads(path.read_text())
+
+
+def save_config(home: Path, config: dict) -> None:
+    """Publish the whole config atomically (temp-write + rename, the
+    shared-file posture). Callers treat failure as advisory — remembering
+    a preference is never worth failing the command that noticed it."""
+    home.mkdir(parents=True, exist_ok=True)
+    write_atomic(config_path(home), json.dumps(config, indent=2) + "\n")
 
 
 @dataclass(frozen=True)

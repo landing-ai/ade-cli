@@ -20,7 +20,7 @@ from pathlib import Path
 
 import typer
 
-from . import attach, credentials, elements, items, oauth, store
+from . import attach, credentials, elements, items, oauth, schema_build, store
 from .config import DEFAULT_ENVIRONMENT, ENVIRONMENTS, ade_home, resolve_target
 from .gateway import Gateway
 from . import guarantee as lifecycle
@@ -317,6 +317,7 @@ def parse(
         next_line = (
             f"\n  next:    ade view {ref} --open"
             f"   ·   ade extract {ref} --schema <schema.json>"
+            f"   ·   ade schema build {ref}"
         )
         copy_line = ""
         if copy_info is not None:
@@ -411,6 +412,15 @@ def parse(
             return {"kept": False, "error": error.message}
         return {"kept": True, "name": name}
 
+    def maybe_offer_schema() -> None:
+        """The post-parse doorway into `ade schema build` (schema_build.py
+        owns the gates: real terminal, no agent host/CI, not opted out).
+        Machine modes never see it, and the summary above already printed
+        the plain next: hint — the offer is additive, never load-bearing."""
+        if as_json or id_only:
+            return
+        schema_build.offer_after_parse(ports, home, jobs, item_id)
+
     # The guarantee: this exact invocation (source x content x params — the
     # id) is served from disk free — unless the last attempt failed (a
     # reported failure resubmits fresh, never cache-hits). live_parse gates
@@ -426,6 +436,7 @@ def parse(
                 completed_at=stored_meta.get("completed_at"),
                 copy_info=maybe_keep_copy(),
             )
+            maybe_offer_schema()
             return
 
     data, job_id, stored = ensure_parsed(
@@ -445,6 +456,7 @@ def parse(
         endpoint_label=resolved.endpoint_label,
     )
     emit_summary(data, job_id, cached=False, stored=stored, copy_info=maybe_keep_copy())
+    maybe_offer_schema()
 
 
 def ensure_parsed(

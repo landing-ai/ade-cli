@@ -25,6 +25,7 @@ from .output import (
 )
 from .parse import parse
 from .ports import Ports
+from .schema_build import schema_app
 from .telemetry import LedgerGroup
 from .update import current_version, install_mode, update
 from .view import view
@@ -130,6 +131,7 @@ app = typer.Typer(
 
 app.add_typer(auth_app)
 app.add_typer(history_app)
+app.add_typer(schema_app)
 # Top-level aliases: the same callbacks as `auth login`/`auth logout`
 # (identical flags and behavior), registered again at the root for muscle
 # memory from other CLIs. Only the help line differs — it names the alias.
