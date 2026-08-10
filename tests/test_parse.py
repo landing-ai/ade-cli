@@ -793,7 +793,69 @@ def test_offer_fires_on_a_tty_and_bare_enter_declines(cli, document):
     result = cli.invoke("parse", "-d", str(document), env=AUTH_ENV, keys=["\r"])
     assert result.exit_code == 0, result.stdout
     assert OFFER in result.stderr
+    assert "Open the viewer" in result.stderr  # all three doors are offered
     assert "next:" in result.stdout  # the plain hint still printed
+
+
+def test_exit_restates_both_commands(cli, document):
+    """Exiting is not a dead end: the menu scrolled the summary's next:
+    line away, so the choice that declines must hand back both commands
+    with an id that resolves."""
+    offer_tty(cli)
+    seed_parse(cli, document)
+    result = cli.invoke("parse", "-d", str(document), env=AUTH_ENV, keys=["\r"])
+    assert result.exit_code == 0, result.stdout
+    assert "ade schema build " in result.stderr
+    assert "ade view " in result.stderr and "--open" in result.stderr
+    # The hinted id is runnable, not decorative.
+    ref = result.stderr.split("ade schema build ", 1)[1].split()[0]
+    found = cli.invoke("find", "--job", ref, "--json")
+    assert found.exit_code == 0, found.stdout
+
+
+def test_offer_opens_the_viewer(cli, document):
+    """The second door: a re-exec of this CLI, so the viewer inherits the
+    terminal and the run ends as `ade view` ended."""
+    import sys as _sys
+
+    from conftest import RecordedRuns
+
+    offer_tty(cli)
+    seed_parse(cli, document)
+    runs = RecordedRuns([0])
+    result = cli.invoke(
+        "parse", "-d", str(document), env=AUTH_ENV, keys=["2", "\r"], run=runs
+    )
+    assert result.exit_code == 0, result.stdout
+    argv, _cwd = runs.calls[0]
+    assert argv[:3] == [_sys.executable, "-m", "ade_cli"]
+    assert argv[3] == "view" and argv[-1] == "--open"
+
+
+def test_viewer_failure_ends_the_run_as_view_ended(cli, document):
+    from conftest import RecordedRuns
+
+    offer_tty(cli)
+    seed_parse(cli, document)
+    result = cli.invoke(
+        "parse", "-d", str(document), env=AUTH_ENV, keys=["2", "\r"],
+        run=RecordedRuns([3]),
+    )
+    assert result.exit_code == 3
+
+
+def test_offer_typed_fallback_offers_all_three(cli, document):
+    """TERM=dumb (and any terminal whose raw mode fails) gets the same
+    three choices as a numbered prompt."""
+    offer_tty(cli)
+    seed_parse(cli, document)
+    result = cli.invoke(
+        "parse", "-d", str(document), env={**AUTH_ENV, "TERM": "dumb"}, input="3\n"
+    )
+    assert result.exit_code == 0, result.stdout
+    for label in ("1) Build an extraction schema", "2) Open the viewer", "3) Exit"):
+        assert label in result.stderr
+    assert "ade schema build " in result.stderr
 
 
 def test_offer_esc_declines_without_failing_the_parse(cli, document):
@@ -801,6 +863,7 @@ def test_offer_esc_declines_without_failing_the_parse(cli, document):
     seed_parse(cli, document)
     result = cli.invoke("parse", "-d", str(document), env=AUTH_ENV, keys=["\x1b"])
     assert result.exit_code == 0, result.stdout
+    assert "ade schema build " in result.stderr  # aborting still teaches
 
 
 def test_offer_fires_on_the_cached_path_too(cli, document):

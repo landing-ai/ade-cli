@@ -23,10 +23,23 @@ subprocess**, in two entry points sharing one body (`schema_build.py`):
 - **`ade schema build JOB_ITEM_ID`** — the standalone command, usable on
   any stored parse.
 - **A post-parse offer** — after a parse summary (fresh or cached hit) on
-  a real terminal, an arrow-key menu (ADR-0002's pattern) asks whether to
-  build a schema now. **Bare Enter exits**: the default preserves the old
-  behavior keystroke-for-keystroke, and the summary's `next:` line remains
-  the machine-mode teaching.
+  a real terminal, an arrow-key menu (ADR-0002's pattern) asks *what
+  next*, with three choices: build a schema, open the viewer, or exit.
+  Those are the two things a human actually does with a fresh parse, plus
+  the way out.
+
+  **Exit is last and the default**, so bare Enter preserves the old
+  behavior keystroke-for-keystroke. It is not a dead end: exiting (and
+  aborting with Esc, and finding no agent installed) prints both commands
+  with a runnable short id, because by then the summary's `next:` line has
+  scrolled behind a menu, and the person who chose Exit is exactly the one
+  who needs them restated. The `next:` line itself remains the
+  machine-mode teaching.
+
+  The viewer choice is the same subprocess-of-self re-exec the extract
+  handoff uses. A door that cannot open (no agent CLI installed) is
+  non-fatal — the parse already succeeded and billed; a door that opens
+  and then fails ends with that command's exit code.
 
 ade collects only what it already knows plus the extraction **intent**
 (and optional existing-schema / ground-truth files); per-field accuracy

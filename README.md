@@ -171,8 +171,10 @@ No schema yet? `ade schema build JOB_ITEM_ID` hands a parsed document to
 an AI-agent session running the
 [build-schema skill](https://github.com/landing-ai/claude-skills), which
 authors and validates the schema through real extractions before
-delivering it (an interactive parse also offers this step when it
-finishes). You describe what to extract; the session negotiates accuracy
+delivering it. On an interactive terminal a finished parse also asks what
+you want next — build a schema, open the viewer, or exit — and exiting
+prints both commands so you can run them yourself later.
+You describe what to extract; the session negotiates accuracy
 targets with you and iterates until the schema converges or is legibly
 blocked. It needs an agent CLI on your PATH — Claude Code (`claude`,
 ideally with the `landingai-ade` plugin) or Codex (`codex`); any other

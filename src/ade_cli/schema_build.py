@@ -12,10 +12,12 @@ directions:
   item, the user's extraction intent, and a workspace; when the session
   ends it looks for the skill's ``deliverable/schema.json`` and offers to
   run the extract.
-- ``offer_after_parse`` is the post-parse doorway into the same flow,
-  heavily gated: a real terminal on all three streams, no ``--json`` or
-  ``--id-only``, no agent host or CI (an agent driving ``ade parse`` must
-  never meet a menu), and not silenced by ``schema_prompt: false``.
+- ``offer_after_parse`` is the post-parse doorway — build a schema, open
+  the viewer, or exit — heavily gated: a real terminal on all three
+  streams, no ``--json`` or ``--id-only``, no agent host or CI (an agent
+  driving ``ade parse`` must never meet a menu), and not silenced by
+  ``schema_prompt: false``. Exit is the default and still teaches: it
+  restates both commands with a runnable id.
 
 ade itself stays network-free here: agents are found on PATH, the skill
 is acquired by the agent (the seeded prompt says how), and the extract
@@ -416,21 +418,47 @@ def build(
     )
 
 
+# Exit last and default: the two doors are opt-in, and bare Enter must
+# leave the pre-offer behavior untouched.
 _OFFER_LABELS = (
     "1) Build an extraction schema with an AI agent",
-    "2) Exit",
+    "2) Open the viewer — grounded pages and markdown",
+    "3) Exit",
 )
+
+
+def _farewell(jobs: store.JobStore, item_id: str) -> str:
+    """What the Exit choice leaves behind: the two commands that reach the
+    doors just declined, spelled with a runnable id. The summary's
+    ``next:`` line scrolled past a menu ago — someone who chose Exit
+    deliberately is exactly who needs them restated."""
+    ref = items.short_id(jobs, item_id)
+    rows = (
+        (f"ade schema build {ref}", "build a schema with an AI agent"),
+        (f"ade view {ref} --open", "open the viewer"),
+    )
+    width = max(len(command) for command, _ in rows)
+    return "\n".join(
+        [
+            "\nWhenever you want them:",
+            *(f"  {command:<{width}}  {what}" for command, what in rows),
+        ]
+    )
 
 
 def offer_after_parse(
     ports: Ports, home: Path, jobs: store.JobStore, item_id: str
 ) -> None:
-    """The post-parse doorway into ``run_build`` — only for a human at a
-    real terminal. Callers pass control only outside ``--json``/
-    ``--id-only``; the gates here keep the offer away from pipes, agent
-    hosts, CI, and anyone who set ``schema_prompt: false``. Bare Enter
-    exits (the summary's ``next:`` line already printed), so the offer
-    never costs a keystroke of the old behavior."""
+    """The post-parse doorway: build a schema, open the viewer, or exit —
+    only for a human at a real terminal. Callers pass control only outside
+    ``--json``/``--id-only``; the gates here keep the offer away from
+    pipes, agent hosts, CI, and anyone who set ``schema_prompt: false``.
+
+    Exit is last and the default, so bare Enter costs no keystroke of the
+    old behavior — and it still teaches, restating both commands with a
+    runnable id. A door that cannot open (no agent CLI installed) is
+    non-fatal; a door that opens and then fails ends as that command
+    ended."""
     if not (
         ports.stdin_is_tty() and ports.stdout_is_tty() and ports.stderr_is_tty()
     ):
@@ -441,33 +469,41 @@ def offer_after_parse(
     config = _readable_config(home)
     if config.get("schema_prompt") is False:
         return
+    exit_index = len(_OFFER_LABELS) - 1
     try:
         index: int | None = None
         if os.environ.get("TERM") != "dumb":
-            typer.echo(
-                "\nBuild an extraction schema from this parse? (↑/↓ and Enter)",
-                err=True,
-            )
+            typer.echo("\nWhat next? (↑/↓ and Enter)", err=True)
             try:
                 index = term.select(
-                    list(_OFFER_LABELS), default=1, getchar=ports.getchar
+                    list(_OFFER_LABELS), default=exit_index, getchar=ports.getchar
                 )
             except term.Unsupported:
                 pass  # the widget erased itself; the typed fallback re-lists
         else:
-            typer.echo("\nBuild an extraction schema from this parse?", err=True)
+            typer.echo("\nWhat next?", err=True)
         if index is None:
             for label in _OFFER_LABELS:
                 typer.echo(f"  {label}", err=True)
-            choice = typer.prompt("Choice", default="2", err=True).strip()
-            index = 0 if choice == "1" else 1
-        if index != 0:
+            choice = typer.prompt(
+                "Choice", default=str(exit_index + 1), err=True
+            ).strip()
+            index = int(choice) - 1 if choice in ("1", "2", "3") else exit_index
+        if index == exit_index:
+            typer.echo(_farewell(jobs, item_id), err=True)
             return
-        # A missing agent CLI is non-fatal on this path: the parse
-        # succeeded and the summary's next: line already serves — the
-        # handoff just isn't installed yet.
+        if index == 1:
+            # The viewer is a re-exec like the extract handoff: it inherits
+            # this terminal, and the run ends as `ade view` ended.
+            raise typer.Exit(
+                code=ports.run_agent(reexec_argv("view", item_id, "--open"))
+            )
+        # A missing agent CLI is non-fatal: the parse succeeded and the
+        # summary's next: line already serves — the handoff just isn't
+        # installed yet.
         if not agents.detect(ports.which, config):
             typer.echo(agents.install_message(), err=True)
+            typer.echo(_farewell(jobs, item_id), err=True)
             return
         meta = jobs.read_json(item_id, "meta.json") or {}
         run_build(
@@ -483,4 +519,5 @@ def offer_after_parse(
         # Esc/Ctrl-C declines the optional add-on; the parse already
         # succeeded and its exit code stays 0.
         typer.echo("", err=True)
+        typer.echo(_farewell(jobs, item_id), err=True)
         return
