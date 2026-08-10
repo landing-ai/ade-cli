@@ -55,6 +55,17 @@ def _slug(source: str) -> str:
     return slug or "document"
 
 
+def _readable_config(home: Path) -> dict:
+    """config.json, or an empty one when it cannot be read. Everything
+    this module takes from it — the agent preference, the prompt opt-out
+    — is optional, so a corrupt or unreadable file must cost the
+    preference, never the handoff (and never a completed parse)."""
+    try:
+        return load_config(home)
+    except (OSError, ValueError):
+        return {}
+
+
 def _parse_item_or_exit(
     jobs: store.JobStore, token: str, *, as_json: bool
 ) -> tuple[str, dict]:
@@ -146,7 +157,7 @@ def _remember_agent(home: Path, chosen: agents.Agent) -> None:
     """Persist the menu choice as ``agent.default`` — advisory: a config
     that cannot be written just means the menu asks again next time."""
     try:
-        config = load_config(home)
+        config = _readable_config(home)
         entry = config.get("agent")
         config["agent"] = {
             **(entry if isinstance(entry, dict) else {}),
@@ -196,7 +207,7 @@ def run_build(
     source = meta.get("source") or item_id
     environment = meta.get("environment", DEFAULT_ENVIRONMENT)
 
-    config = load_config(home)
+    config = _readable_config(home)
     if agent_name is not None:
         # An explicit --agent bypasses the remembered default: it names
         # any known or config-declared agent, needing only a PATH hit.
@@ -427,10 +438,7 @@ def offer_after_parse(
     surf = surface.detect(os.environ, stdout_is_tty=ports.stdout_is_tty())
     if surf.host is not None or surf.term == "ci":
         return
-    try:
-        config = load_config(home)
-    except Exception:
-        return  # an unreadable config must never taint a completed parse
+    config = _readable_config(home)
     if config.get("schema_prompt") is False:
         return
     try:

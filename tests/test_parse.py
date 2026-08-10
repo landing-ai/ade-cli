@@ -893,3 +893,15 @@ def test_offer_id_only_stays_silent(cli, document):
     result = cli.invoke("parse", "-d", str(document), "--id-only", env=AUTH_ENV)
     assert result.exit_code == 0
     assert OFFER not in result.stderr
+
+
+def test_offer_survives_a_corrupt_config(cli, document):
+    """A hand-edited config.json with invalid JSON must never fail a
+    parse that already succeeded and billed."""
+    offer_tty(cli)
+    seed_parse(cli, document)
+    cli.home.mkdir(parents=True, exist_ok=True)
+    (cli.home / "config.json").write_text("{not valid json")
+    result = cli.invoke("parse", "-d", str(document), env=AUTH_ENV, keys=["\r"])
+    assert result.exit_code == 0, result.stdout
+    assert OFFER in result.stderr

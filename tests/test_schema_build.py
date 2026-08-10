@@ -302,3 +302,220 @@ def test_build_refuses_an_extract_item(tty, document, tmp_path):
     )
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error"] == "not_a_parse_item"
+
+
+# ------------------------------------------------- workspace & prompt details
+
+
+def test_workspace_slug_comes_from_the_source_and_is_reused(tty, document):
+    """The default workspace names the engagement after the document, and
+    a second run lands in the same directory so the skill resumes rather
+    than starting a fresh loop."""
+    item_id = parse_doc(tty, document)
+    first = RecordedRuns([deliver_schema])
+    tty.invoke(
+        "schema", "build", item_id, "--json", "--intent", "totals",
+        which=CLAUDE, run=first,
+    )
+    second = RecordedRuns([deliver_schema])
+    tty.invoke(
+        "schema", "build", item_id, "--json", "--intent", "totals",
+        which=CLAUDE, run=second,
+    )
+    assert first.calls[0][1] == second.calls[0][1]
+    assert first.calls[0][1].name.startswith("invoice-")
+
+
+def test_explicit_workspace_is_honored(tty, document, tmp_path):
+    item_id = parse_doc(tty, document)
+    workspace = tmp_path / "engagement"
+    runs = RecordedRuns([deliver_schema])
+    result = tty.invoke(
+        "schema", "build", item_id, "--json", "--intent", "totals",
+        "--workspace", str(workspace), which=CLAUDE, run=runs,
+    )
+    assert result.exit_code == 0, result.stdout
+    assert runs.calls[0][1] == workspace
+    assert json.loads(result.stdout)["workspace"] == str(workspace)
+
+
+def test_url_sourced_parse_still_yields_a_usable_slug(tty):
+    """A URL source has no filesystem stem to borrow; the workspace name
+    must still be a clean directory (query strings and slashes stripped)."""
+    tty.transport.respond(202, {"job_id": JOB_ID})
+    tty.transport.respond(200, completed_job())
+    parsed = tty.invoke(
+        "parse", "--document-url", "https://example.com/docs/Q3%20Report.pdf?sig=abc",
+        "--json", env=AUTH_ENV,
+    )
+    assert parsed.exit_code == 0, parsed.stdout
+    item_id = json.loads(parsed.stdout)["job_item_id"]
+    runs = RecordedRuns([deliver_schema])
+    result = tty.invoke(
+        "schema", "build", item_id, "--json", "--intent", "totals",
+        which=CLAUDE, run=runs,
+    )
+    assert result.exit_code == 0, result.stdout
+    name = runs.calls[0][1].name
+    assert re.fullmatch(r"[a-z0-9-]+-\d{4}-\d{2}-\d{2}", name), name
+
+
+def test_flags_feed_the_prompt_without_prompting(tty, document, tmp_path):
+    """--existing-schema and --ground-truth skip their prompts and reach
+    the agent as the skill's baseline and golden set."""
+    item_id = parse_doc(tty, document)
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(SCHEMA))
+    golden = tmp_path / "golden.csv"
+    golden.write_text("doc_id,total\ninvoice.pdf,42\n")
+    runs = RecordedRuns([deliver_schema])
+    result = tty.invoke(
+        "schema", "build", item_id, "--intent", "totals",
+        "--existing-schema", str(baseline), "--ground-truth", str(golden),
+        which=CLAUDE, run=runs, input="n\n",  # only the extract confirm remains
+    )
+    assert result.exit_code == 0, result.stdout
+    prompt = runs.calls[0][0][1]
+    assert str(baseline) in prompt and str(golden) in prompt
+
+
+def test_optional_path_typo_reprompts_instead_of_dropping_it(tty, document, tmp_path):
+    item_id = parse_doc(tty, document)
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(SCHEMA))
+    runs = RecordedRuns([deliver_schema])
+    result = tty.invoke(
+        "schema", "build", item_id, "--intent", "totals",
+        which=CLAUDE, run=runs,
+        input=f"/no/such/schema.json\n{baseline}\n\nn\n",
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "No such file" in result.stderr
+    assert str(baseline) in runs.calls[0][0][1]
+
+
+def test_prompt_names_a_non_default_environment(tty, document):
+    """The skill must run its extractions in the parse item's own
+    environment; production stays unstated (the beaten path)."""
+    tty.transport.respond(202, {"job_id": JOB_ID})
+    tty.transport.respond(200, completed_job())
+    staged = tty.invoke(
+        "parse", "-d", str(document), "--env", "staging", "--json", env=AUTH_ENV
+    )
+    assert staged.exit_code == 0, staged.stdout
+    item_id = json.loads(staged.stdout)["job_item_id"]
+    runs = RecordedRuns([deliver_schema])
+    tty.invoke(
+        "schema", "build", item_id, "--json", "--intent", "totals",
+        which=CLAUDE, run=runs,
+    )
+    assert "ADE environment: staging" in runs.calls[0][0][1]
+
+
+# --------------------------------------------------------- failure & fallback
+
+
+def test_agent_that_cannot_be_launched_fails_legibly(tty, document):
+    item_id = parse_doc(tty, document)
+
+    def explode(argv, cwd=None):
+        raise OSError("Exec format error")
+
+    result = tty.invoke(
+        "schema", "build", item_id, "--json", "--intent", "totals",
+        which=CLAUDE, run=explode,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "agent_launch_failed"
+    assert "Exec format error" in payload["message"]
+
+
+def test_extract_exit_code_propagates(tty, document):
+    """The handoff ends as the extraction ended — a failed extract must
+    not be reported as a successful build."""
+    item_id = parse_doc(tty, document)
+    runs = RecordedRuns([deliver_schema, 4])
+    result = tty.invoke(
+        "schema", "build", item_id, "--intent", "totals",
+        which=CLAUDE, run=runs, input="\n\ny\n",
+    )
+    assert result.exit_code == 4
+
+
+def test_menu_falls_back_to_typed_input_when_raw_mode_fails(tty, document):
+    """term.Unsupported (a terminal that lies about raw mode) must reach
+    the numbered prompt, not abort the handoff."""
+    item_id = parse_doc(tty, document)
+    runs = RecordedRuns([deliver_schema])
+    result = tty.invoke(
+        "schema", "build", item_id, "--intent", "totals",
+        which=BOTH, run=runs, keys=[OSError("no raw mode")],
+        input="2\n\n\nn\n",  # typed agent choice, two skips, decline extract
+    )
+    assert result.exit_code == 0, result.stdout
+    assert runs.calls[0][0][0] == "codex"
+
+
+def test_dumb_terminal_uses_the_typed_menu(tty, document):
+    item_id = parse_doc(tty, document)
+    runs = RecordedRuns([deliver_schema])
+    result = tty.invoke(
+        "schema", "build", item_id, "--intent", "totals",
+        which=BOTH, run=runs, env={"TERM": "dumb"},
+        input="2\n\n\nn\n",
+    )
+    assert result.exit_code == 0, result.stdout
+    assert runs.calls[0][0][0] == "codex"
+
+
+def test_unwritable_config_does_not_break_the_handoff(tty, document):
+    """Remembering the menu choice is advisory — a config.json that is a
+    directory (unwritable) must cost the memory, not the run."""
+    item_id = parse_doc(tty, document)
+    (tty.home).mkdir(parents=True, exist_ok=True)
+    (tty.home / "config.json").mkdir()
+    runs = RecordedRuns([deliver_schema])
+    result = tty.invoke(
+        "schema", "build", item_id, "--intent", "totals",
+        which=BOTH, run=runs, keys=["1", "\r"], input="\n\nn\n",
+    )
+    assert result.exit_code == 0, result.stdout
+    assert runs.calls[0][0][0] == "claude"
+
+
+def test_unknown_id_is_the_shared_error_shape(tty):
+    result = tty.invoke(
+        "schema", "build", "ffffffff", "--json", "--intent", "totals", which=CLAUDE
+    )
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["error"] == "unknown_id"
+
+
+def test_agent_ambiguous_under_json(tty, document):
+    """--json cannot show a menu, so several agents is a usage error that
+    names the flag that resolves it."""
+    item_id = parse_doc(tty, document)
+    result = tty.invoke(
+        "schema", "build", item_id, "--json", "--intent", "totals", which=BOTH
+    )
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "agent_ambiguous"
+    assert sorted(payload["agents"]) == ["claude", "codex"]
+    assert "--agent" in payload["message"]
+
+
+def test_corrupt_config_costs_the_preference_not_the_handoff(tty, document):
+    """config.json is hand-editable; invalid JSON there must not take the
+    handoff down with it — the agent preference is the only thing lost."""
+    item_id = parse_doc(tty, document)
+    (tty.home).mkdir(parents=True, exist_ok=True)
+    (tty.home / "config.json").write_text("{not valid json")
+    runs = RecordedRuns([deliver_schema])
+    result = tty.invoke(
+        "schema", "build", item_id, "--json", "--intent", "totals",
+        which=CLAUDE, run=runs,
+    )
+    assert result.exit_code == 0, result.stdout
+    assert json.loads(result.stdout)["agent"] == "claude"
