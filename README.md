@@ -36,20 +36,6 @@ irm https://raw.githubusercontent.com/landing-ai/ade-cli/main/scripts/install.ps
 curl -fsSL https://raw.githubusercontent.com/landing-ai/ade-cli/main/scripts/install.cmd -o install.cmd && install.cmd && del install.cmd
 ```
 
-The app lands in `~/.ade/bin`, and the installer symlinks `ade` into
-`~/.local/bin`, which is on the PATH in most setups. Set `ADE_HOME` to move the
-app and the store, `ADE_CLI_VERSION` to pin a version, and
-`ADE_CLI_INSTALL_DIR` to change the destination.
-
-To uninstall, remove `~/.ade/bin` and the `~/.local/bin/ade` symlink. Never run
-`rm -rf ~/.ade`: the rest of that directory holds results that already consumed
-credits.
-
-Run `ade update` to self-update, with `--yes` to skip the confirmation. For a
-`uv` or `pipx` install it points at `uv tool upgrade ade-cli` instead. The CLI
-mentions new releases on stderr once a day. Set `ADE_NO_UPDATE_CHECK=1` to turn
-that off.
-
 To develop or install from source, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## First run
@@ -112,6 +98,22 @@ Non-interactive shells such as CI, cron, and agent harnesses source no rc file,
 so a PATH entry your login shell has may be missing. Call the absolute path
 `~/.ade/bin/ade`, or export `PATH="$HOME/.ade/bin:$PATH"` inside the job. For
 credentials, set `ADE_API_KEY`.
+
+## Managing your install
+
+The app lands in `~/.ade/bin`, and the installer symlinks `ade` into
+`~/.local/bin`, which is on the PATH in most setups. Set `ADE_HOME` to move the
+app and the store, `ADE_CLI_VERSION` to pin a version, and
+`ADE_CLI_INSTALL_DIR` to change the destination.
+
+Run `ade update` to self-update, with `--yes` to skip the confirmation. For a
+`uv` or `pipx` install it points at `uv tool upgrade ade-cli` instead. The CLI
+mentions new releases on stderr once a day. Set `ADE_NO_UPDATE_CHECK=1` to turn
+that off.
+
+To uninstall, remove `~/.ade/bin` and the `~/.local/bin/ade` symlink. Never run
+`rm -rf ~/.ade`: the rest of that directory holds results that already consumed
+credits.
 
 ## Project history
 
