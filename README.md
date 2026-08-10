@@ -3,12 +3,11 @@
 [![Release](https://img.shields.io/github/v/release/landing-ai/ade-cli)](https://github.com/landing-ai/ade-cli/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-**Agentic Document Extraction (ADE), from your terminal.** The `ade` command
-drives LandingAI's ADE v2 APIs: `parse` turns visually complex documents
-(tables, figures, charts) into grounded Markdown and elements, and `extract`
-pulls schema-shaped fields with page-and-box evidence. Everything a run
-produces is saved in a local store at `~/.ade` and served from there, so
-re-running an identical command consumes no credits.
+**Agentic Document Extraction (ADE), from your terminal.** Run `ade parse` to
+turn documents with tables, figures, and charts into grounded Markdown and
+elements, and `ade extract` to pull schema-shaped fields with page-and-box
+evidence. Both save to a local store at `~/.ade`, so re-running an identical
+command consumes no credits.
 
 **[CLI documentation](https://docs.landing.ai/cli/quickstart)** ·
 **[Playground](https://ade.landing.ai)** ·
@@ -17,8 +16,7 @@ re-running an identical command consumes no credits.
 ## Install
 
 Each release ships self-contained binaries for macOS, Linux, and Windows
-(arm64 and x86_64). No Python and no `uv` are needed. The installers detect
-your platform, verify the checksum, and put `ade` on your machine.
+(arm64 and x86_64). No Python or `uv` needed.
 
 **macOS / Linux**
 
@@ -38,27 +36,21 @@ irm https://raw.githubusercontent.com/landing-ai/ade-cli/main/scripts/install.ps
 curl -fsSL https://raw.githubusercontent.com/landing-ai/ade-cli/main/scripts/install.cmd -o install.cmd && install.cmd && del install.cmd
 ```
 
-The app lands in `~/.ade/bin` (`%USERPROFILE%\.ade\bin` on Windows): the binary
-plus an `_internal/` directory holding its bundled libraries. That sits inside
-the CLI's own home, next to the store, and `ADE_HOME` moves both. The installer
-also symlinks `ade` into `~/.local/bin`, which is on the PATH in most setups,
-so no rc-file edit is needed. It verifies the link runs and never overwrites a
-real file at that name.
+The app lands in `~/.ade/bin`, and the installer symlinks `ade` into
+`~/.local/bin`, which is on the PATH in most setups. Set `ADE_HOME` to move the
+app and the store, `ADE_CLI_VERSION` to pin a version, and
+`ADE_CLI_INSTALL_DIR` to change the destination.
 
-To pin a version, set `ADE_CLI_VERSION=1.0.5`. To change the destination, set
-`ADE_CLI_INSTALL_DIR`. To uninstall, remove `~/.ade/bin` and the
-`~/.local/bin/ade` symlink. Never run `rm -rf ~/.ade`: the rest of that
-directory is your local record of parse and extract results that already
-consumed credits.
+To uninstall, remove `~/.ade/bin` and the `~/.local/bin/ade` symlink. Never run
+`rm -rf ~/.ade`: the rest of that directory holds results that already consumed
+credits.
 
-Run `ade update` to check the release channel and self-update after a
-confirmation prompt, which `--yes` skips. A `uv` or `pipx` install is never
-touched in place; `update` points at `uv tool upgrade ade-cli` instead, and
-`ade version` reports which kind of install you have. The CLI also checks
-quietly in the background at most once a day and mentions a newer release on
-stderr. Set `ADE_NO_UPDATE_CHECK=1` to turn that off.
+Run `ade update` to self-update, with `--yes` to skip the confirmation. For a
+`uv` or `pipx` install it points at `uv tool upgrade ade-cli` instead. The CLI
+mentions new releases on stderr once a day. Set `ADE_NO_UPDATE_CHECK=1` to turn
+that off.
 
-Developing, or installing from source? See [CONTRIBUTING.md](CONTRIBUTING.md).
+To develop or install from source, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## First run
 
