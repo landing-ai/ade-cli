@@ -3,21 +3,20 @@
 [![Release](https://img.shields.io/github/v/release/landing-ai/ade-cli)](https://github.com/landing-ai/ade-cli/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-**Agentic Document Extraction (ADE), from your terminal.** The `ade` command drives
-LandingAI's ADE v2 document APIs — `parse` turns visually complex documents
-(tables, figures, charts) into grounded markdown and elements; `extract` pulls
-schema-shaped fields with page-and-box evidence — and persists everything it
-produces in a local store (`~/.ade`), serving every read from it.
+**Agentic Document Extraction (ADE), from your terminal.** Run `ade parse` to
+turn documents with tables, figures, and charts into grounded Markdown and
+elements, and `ade extract` to pull schema-shaped fields with page-and-box
+evidence. Both save to a local store at `~/.ade`, so re-running an identical
+command consumes no credits.
 
-**[Documentation](https://docs.landing.ai/)** ·
+**[CLI documentation](https://docs.landing.ai/cli/quickstart)** ·
 **[Playground](https://ade.landing.ai)** ·
 **[Get an API key](https://ade.landing.ai/settings/api-key)**
 
 ## Install
 
 Each release ships self-contained binaries for macOS, Linux, and Windows
-(arm64 and x86_64 each) — no Python, no `uv`. The installers detect your
-platform, verify the checksum, and put `ade` on your machine:
+(arm64 and x86_64). No Python or `uv` needed.
 
 **macOS / Linux**
 
@@ -37,298 +36,96 @@ irm https://raw.githubusercontent.com/landing-ai/ade-cli/main/scripts/install.ps
 curl -fsSL https://raw.githubusercontent.com/landing-ai/ade-cli/main/scripts/install.cmd -o install.cmd && install.cmd && del install.cmd
 ```
 
-The app lands in `~/.ade/bin` (`%USERPROFILE%\.ade\bin` on Windows) — the
-binary plus an `_internal/` dir with its bundled libraries — inside the
-CLI's own home, next to the store; `ADE_HOME` moves both. The installer
-also symlinks `ade` into `~/.local/bin` (creating it if needed — it's on
-PATH in most setups, so no rc-file edit is needed) and verifies the link
-runs; it never overwrites a real file at that name. Scripting `ade`? See
-[Agents](#agents): a non-interactive shell sources no rc file, so use the
-absolute path `~/.ade/bin/ade`. Pin a version with `ADE_CLI_VERSION=0.2.1`, change
-the destination with `ADE_CLI_INSTALL_DIR`. To uninstall, remove
-`~/.ade/bin` and the `~/.local/bin/ade` symlink — never
-`rm -rf ~/.ade`, since the rest of that directory is your local store of
-billed parse/extract results.
-(Developing or installing from source? See
-[CONTRIBUTING.md](CONTRIBUTING.md).)
+To develop or install from source, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Staying current is one command: `ade update` checks the release channel
-and, for a binary install, replaces the app in place after verifying the
-release checksum (`--yes` skips the confirmation). A `uv`/`pipx` install
-is never touched — `update` points at `uv tool upgrade ade-cli` instead;
-`ade version` reports which kind you have. The CLI also checks quietly
-in the background at most once a day and mentions a newer release on
-stderr; set `ADE_NO_UPDATE_CHECK=1` to turn that off.
+## First run
 
-## Auth
-
-| command | what it does |
-|---|---|
-| `ade auth login` | choose a method: paste an API key, or sign in with your browser (OAuth) |
-| `ade auth login --api-key KEY` | store an API key for production directly |
-| `ade auth login --api-key -` | prompt for the key (hidden input) |
-| `echo $KEY \| ade auth login` | headless: a piped key is the prompt, answered |
-| `ade auth login --env eu` | log in to the EU region (no-op if it already holds a credential) |
-| `ade auth login --org acme` | browser sign-in acting in a specific organization (id or name) |
-| `ade auth status` | the resolved target + every other environment holding a credential |
-| `ade auth org list` | your organizations, live, marking the selected one |
-| `ade auth org switch acme` | act in a different organization — no re-login needed |
-| `ade auth org clear` | drop the selection, falling back to the platform default |
-| `ade auth logout` | log out of the resolved target |
-| `ade auth logout --env eu` | log out of a specific environment |
-| `ade auth logout --all` | log out of every environment |
-| `ade login` | top-level alias of `ade auth login` — same flags, same behavior |
-| `ade logout` | top-level alias of `ade auth logout` — same flags, same behavior |
-
-Browser sign-in runs an OAuth flow against your LandingAI account and
-stores refreshable tokens; nothing to copy. API keys come from your
-[LandingAI account settings](https://ade.landing.ai/settings/api-key).
-`login` verifies the key against the target environment before storing
-it — a mistyped key fails right at login, not at your first `parse`.
-
-If your account belongs to one organization, browser sign-in selects it
-automatically; if it belongs to several, the login asks (or takes
-`--org`), and `ade auth org switch` changes it any time without a
-browser round-trip. Requests run — and bill — in the selected
-organization. An API key needs no selection and accepts none: it acts
-in the organization it was created in, so to work in a different
-organization with keys, create a key there and log in with that one.
-
-**There is no "current environment" — the target is resolved fresh on every
-command**: the `--env` flag, else the `ADE_ENV` variable, else `production`.
-`export ADE_ENV=eu` gives one shell sticky EU while another shell works
-production; nothing global changes, and `parse`/`extract`/`auth` all
-follow the same rule, so a login and the verb after it can never disagree.
-Credentials are stored per environment, because ADE credentials don't cross
-environments:
-
-| `--env` / `ADE_ENV` | endpoint |
-|---|---|
-| `production` (default) | `https://api.ade.landing.ai` |
-| `eu` | `https://api.ade.eu-west-1.landing.ai` |
-
-`login` ensures the target is authenticated: with a stored credential it says
-so and does nothing; otherwise it acquires one (menu on a terminal). To force
-a fresh login, `logout --env X` first. Each environment's results are
-separate job items too — the environment is part of the job item id, so an
-EU parse never masquerades as a production one.
-
-`ADE_ENDPOINT` is the raw-URL escape hatch: it overrides the endpoint only,
-while credentials still file under the resolved environment. `ADE_API_KEY`
-overrides whatever credential is stored. Keys are stored per environment
-in `~/.ade/credentials.json` (mode 0600).
-Every command supports `--json` for one stable JSON object on stdout.
-
-**Headless setup never needs a terminal.** Where there is nothing to prompt
-on — CI, cron, an agent harness, a wrapped shell — set `ADE_API_KEY`, or
-pipe the key in: `echo $KEY | ade auth login` stores it for the resolved
-environment exactly as the prompt would. (`--api-key KEY` works too, but an
-inline key is visible to `ps`.) Nothing hangs waiting on an idle stdin: with
-no key available the login tries browser sign-in, and where no browser can
-open it exits immediately, naming all three paths.
-`ade help credentials` is the same page from the CLI.
-
-## Parse
-
-| command | what it does |
-|---|---|
-| `ade parse -d invoice.pdf` | ensure parsed; artifacts land in `~/.ade` |
-| `ade parse --document-url https://…/doc.pdf` | server fetches the URL |
-| `ade parse --document-url https://… --keep-copy` | also store the document bytes locally, while the (often pre-signed) URL still works |
-| `ade parse -d doc.pdf --tier standard --wait 0` | cheap lane, submit-and-return |
-| `ade parse -d doc.pdf --env eu` | run in the EU region (or `export ADE_ENV=eu`) |
-| `ade parse -d doc.pdf --include markdown --json` | carry the markdown in the payload |
-| `JOB=$(ade parse -d doc.pdf --id-only)` | just the job item id, for piping |
-
-Every run is a **job item** — keyed by the invocation, `verb × environment ×
-source path × content × params` — one flat folder under
-`~/.ade/jobs/<job-item-id>/`:
-`parse.json` (raw response), `parse.md` (markdown with its doc_id trailer),
-`elements.json` (flat elements projection, recomputable from `parse.json`),
-`meta.json` (provenance + params + identity), `job.json` (claim ticket).
-(Inside these files the server-side run id is spelled `job_id` — the
-wire's name for the same value `--json` payloads report as `run_id`;
-neither is the job item id.)
-`parse` is a guarantee: re-running the exact same invocation is served from
-disk with zero API calls (`--force` re-parses in place); changed params —
-or a moved/edited file — mint a *sibling* job item, so variants coexist and
-nothing is silently replaced; a pending run is resumed, never resubmitted;
-Ctrl-C stops the waiting, not the work — the same command resumes.
-Exit codes: `0` parsed, `1` failed, `2` usage, `3` still pending (re-run the
-same command to resume), `4` rate-limited before submit.
-`--json` carries the summary; `--include markdown` / `--include elements`
-add the bulk artifacts to it, so a script never has to reach into the store
-for them. `--id-only` prints just the job item id — the piping spelling:
+Log in once per machine, parse a document, then extract the fields you want
+from it. The parse summary prints the job item ID that `extract` takes.
 
 ```sh
-JOB=$(ade parse -d doc.pdf --wait 0 --id-only)   # submit and return, exit 3
-ade parse -d doc.pdf --id-only                    # re-run to resume; same id
+ade login
+ade parse -d invoice.pdf
+ade extract JOB_ITEM_ID --schema schema.json
 ```
 
-## Extract
+The [CLI Quickstart](https://docs.landing.ai/cli/quickstart) walks through the
+same three steps with a sample document and a sample schema, and ends in the
+viewer that shows where each extracted value came from.
+
+## Commands
+
+Every command takes `--json` for one stable JSON object on stdout. Run
+`ade help COMMAND` for its flags and result shape, or see the
+[CLI Reference](https://docs.landing.ai/cli/reference).
 
 | command | what it does |
 |---|---|
-| `ade extract JOB_ITEM_ID --schema schema.json` | extract a completed parse job item |
-| `ade extract -d invoice.pdf --schema '…'` | by path: reuse the latest parse, else parse first |
-| `ade extract --markdown notes.md --schema '…'` | bring-your-own markdown |
-| `ade extract --markdown-url https://…/notes.md --schema schema.json` | bring-your-own markdown, fetched by the server |
+| `ade parse` | Parse a document into Markdown, elements, and grounding |
+| `ade extract` | Pull schema-shaped fields from a parse, with per-field evidence |
+| `ade find` | Search a parse's elements locally, with no API call |
+| `ade crop` | Save an element's region of the page as a PNG |
+| `ade view` | Build and open a self-contained HTML viewer for a job item |
+| `ade history list` | List stored job items, newest first |
+| `ade history clear` | Delete stored job items |
+| `ade login` / `ade auth login` | Log in with your browser or an API key |
+| `ade auth status` | Show how you are authenticated and where |
+| `ade auth org list` / `switch` / `clear` | Choose which organization your runs act in |
+| `ade logout` / `ade auth logout` | Log out of one environment, or all of them |
+| `ade version` | Print the version and install mode |
+| `ade update` | Self-update to the latest release |
+| `ade help` | Print the whole command surface, including `--json` result shapes |
 
-Every extraction is its own top-level job item. Given a parse job item id,
-the extract item *references* the parse (`parse/ref.json`) — artifacts are
-never copied — and **inherits the parse item's environment** (its
-server-side parse run exists nowhere else; a conflicting `--env` is
-refused). Given a document path, the latest completed parse of that
-path+content in the target environment is reused (logged, referenced like
-the id form); if none
-exists the CLI **runs a standalone parse first** — a normal top-level
-parse item, exactly as if you had run `parse -d` — then the extract
-referencing it, both bills itemised in one summary. Every parse the CLI
-runs is reusable, so repeated `extract -d` on a never-parsed document
-bills the parse exactly once. Bring-your-own markdown is copied in as
-`markdown.md` (spans index exactly those bytes); it has no parse edge, so
-evidence degrades to spans-only. The schema must define at least one
-property — an empty schema is refused locally (`empty_schema`) before
-anything is submitted or billed.
+The documentation covers what these tables cannot: how job items work and why
+re-runs are free ([CLI Concepts](https://docs.landing.ai/cli/concepts)),
+[parsing](https://docs.landing.ai/cli/parse) and
+[extraction](https://docs.landing.ai/cli/extract) in depth,
+[searching and cropping evidence](https://docs.landing.ai/cli/find-crop-view),
+[authentication and organizations](https://docs.landing.ai/cli/authentication),
+and [scripting the CLI](https://docs.landing.ai/cli/scripting-automation).
 
-The extraction itself is on stdout: `--json` carries the schema-shaped
-result under `extraction`, alongside the per-field `evidence` join —
-reading `extract.json` out of the store is a convenience, never a
-requirement.
+## For agents
 
-```sh
-ade extract $JOB --schema schema.json --json | jq .extraction
-```
+Agents are first-class callers. Running `ade help --json` returns the entire
+shipped surface in one call: every command, flag, result shape, topic, exit
+state, and the store layout. Every command then takes `--json` and emits one
+stable object whose shape is published per verb, and the full result is always
+on stdout rather than only in a store file.
+[`SKILL.md`](SKILL.md) ships the agent contract: the loop, the conventions, and
+the sharp edges.
 
-## View
+A process that is already running keeps the environment it started with, so
+`ade` may not be on the PATH inside CI, cron, or an agent harness. Call the
+absolute path instead: `~/.ade/bin/ade` on macOS and Linux, or
+`%USERPROFILE%\.ade\bin\ade.exe` on Windows. For credentials, set
+`ADE_API_KEY`.
 
-| command | what it does |
-|---|---|
-| `ade view` | the latest *viewable* job item's HTML viewer (opens in your browser on a terminal) |
-| `ade view JOB_ITEM_ID` | a specific job item (id or unambiguous prefix) |
-| `ade view JOB_ITEM_ID --element-id ELEMENT_ID` | deep link straight to one element |
-| `ade crop JOB_ITEM_ID --element-id ELEMENT_ID` | PNG of just that element's region |
-| `ade crop JOB_ITEM_ID --type figure` | PNG of every figure — one command, no loop |
-| `ade crop JOB_ITEM_ID --all -o ./crops` | every element, into a directory you pick |
+## Managing your install
 
-On a terminal, `view` opens the viewer in your browser by default
-(`--no-open` suppresses it); `--json` runs and piped output never
-launch a browser — the artifact path is in the output either way.
-Without a JOB_ITEM_ID, `view` targets the latest viewable job item.
-URL-parsed items have no local document bytes, so on first `view` or
-`crop` the CLI fetches a copy of the document into the job item
-automatically — announced on stderr with a progress line, plain HTTP,
-no API credits (`--no-download` skips the fetch; previews then stay
-empty). Note pre-signed URLs expire, so `parse --keep-copy` at parse
-time is the reliable way to secure the bytes. Previews and crops render
-from the attached copy with an "unverified against the parsed run"
-caveat.
+|  | macOS and Linux | Windows |
+|---|---|---|
+| App | `~/.ade/bin/ade` | `%USERPROFILE%\.ade\bin\ade.exe` |
+| Store | `~/.ade` | `%USERPROFILE%\.ade` |
+| Reaches your PATH via | a symlink in `~/.local/bin` | a user PATH entry |
 
-Every job item gets a **self-contained `view.html`**: page images with
-bounding-box overlays beside the parsed markdown (or extraction JSON),
-selection synced across both panes, and a history sidebar for jumping
-between items. Deep links are the citation contract — `--element-id`
-emits `view.html#element=…`, which opens with that element selected on
-both sides. `crop` cuts element regions straight out of the source
-document (`--dpi`, default 300) — visual evidence for an answer, one
-command. Address one element with `--element-id` (ids from `ade find`),
-or crop in batch with the very same filters `find` searches by:
-`--type figure`, `--page 3`, `--all`. Crops land in the job item's
-`crops/` (or a directory you name with `-o`; a single crop's `-o` may
-also name the PNG path itself), and `--json` always returns the same
-shape — `count` plus one `crops[]` record per PNG — whether one element
-matched or many. Everything renders from the
-local store: zero API calls, rebuilds fingerprint-gated. Long documents
-stay browsable end to end — the artifact embeds the first 40 pages and
-loads the rest on demand from sidecar files rendered into the store.
+Set `ADE_HOME` to move the app and the store, `ADE_CLI_VERSION` to pin a
+version, and `ADE_CLI_INSTALL_DIR` to change the destination.
 
-## History
+Run `ade update` to self-update, with `--yes` to skip the confirmation. For a
+`uv` or `pipx` install it points at `uv tool upgrade ade-cli` instead. The CLI
+mentions new releases on stderr once a day. Set `ADE_NO_UPDATE_CHECK=1` to turn
+that off.
 
-| command | what it does |
-|---|---|
-| `ade history` | defaults to `ade history list` |
-| `ade history list` | one row per job item: id, kind, state, params, source — newest 100, newest first |
-| `ade history list --asc` | the same newest items, oldest first |
-| `ade history list --all` | every stored job item, no cap (`--limit N` picks another cap) |
-| `ade history list --json` | full records (params verbatim, timestamps, linkage) |
-| `ade history clear JOB_ITEM_ID` | delete an item; clearing a parse cascades to its extracts |
-| `ade history clear --all` | delete every stored job item |
+To uninstall, remove the app directory, and on macOS and Linux the
+`~/.local/bin/ade` symlink too. Never delete all of `.ade`: the rest of that
+directory holds results that already consumed credits.
 
-The read model over the store — zero API calls; states derive from tickets
-and artifacts on disk. Listings show the newest 100 submissions, newest
-first (the run you just did leads, matching the viewer sidebar) — a
-capped listing says so in its first line; `--limit N` adjusts the cap,
-`--all` lifts it, and `--asc` presents the same items oldest-first, in
-`--json` too. Extract items
-referencing a parse render as indented
-child rows beneath it; an extraction whose parse was re-run in place with
-`--force` is marked **stale** (listing annotation, `"stale": true` in
-`--json`, and an amber mark with a hover tooltip in the viewer sidebar) —
-re-run `ade extract` to refresh it. Every `history`/`view` run re-scans
-`jobs/` and rewrites `~/.ade/history.js` (the viewer sidebar's read model),
-so manually deleted folders simply vanish from listings.
+## Project history
 
-Commands that read the store (`view`, `crop`, `find`, `history clear`,
-`extract JOB_ITEM_ID`) take a **job item id or an unambiguous prefix** — paths
-are accepted only by the convenience verbs (`parse -d`, `extract -d`); run
-`ade history list` when you have a path and need an id.
-
-## Find
-
-| command | what it does |
-|---|---|
-| `ade find JOB_ITEM_ID "total"` | case-insensitive substring |
-| `ade find --job ITEM_A --job ITEM_B --json "€42"` | multi-item (`--job`, repeatable), tagged by `job_item_id` |
-| `ade find JOB_ITEM_ID --type table_cell --regex '€\d+'` | filters compose: type + regex |
-| `ade find JOB_ITEM_ID --page 1 --limit 5` | no query = every element |
-
-Pure local search over a parse job item's elements projection — zero API
-calls, no ranking. All filters compose (AND): QUERY (substring, or a regex
-with `--regex`), `--type`, `--page`, `--element-id` (repeatable), `--limit`.
-Matches are the citation currency, one record per element in document order
-(page, then reading order): `{job_item_id, element_id, type, page, box, text}`.
-`--id-only` prints the element ids alone, one per line, for piping into
-anything that takes them — though `crop` accepts these same filters
-directly, so cropping a selection needs no bridge.
-
-## Help topics
-
-`ade help` is the whole-surface reference in one call. It also carries the
-conceptual pages a per-command `--help` has nowhere to put:
-
-| topic | what it explains |
-|---|---|
-| `ade help workflow` | how the verbs compose — the pipeline, before your first run |
-| `ade help output` | `--json`, `--id-only`, and where results live |
-| `ade help credentials` | environment resolution and headless setup |
-| `ade help errors` | exit states and the error payload shape |
-
-`ade help COMMAND` scopes the reference to one command — including the
-published shape of its `--json` result.
-
-## Agents
-
-Agents are first-class callers: every command takes `--json` and emits one
-stable JSON object whose shape is published per verb (`ade help --json`
-carries a `result` block for each), the full result is always on stdout —
-never only in a store file — `ade help --json` returns the entire shipped
-surface (commands, flags, result shapes, topics, exit states, store
-layout) in a single call, and [`SKILL.md`](SKILL.md) ships the agent
-contract: the loop, the conventions, and the sharp edges.
-
-Automating installs: the binary lands at `~/.ade/bin/ade`, and the
-installer ends by naming that absolute path. Non-interactive shells (CI,
-cron, agent harnesses) source no rc file, so a PATH entry your login shell
-has may not be there — call the absolute path, or export
-`PATH="$HOME/.ade/bin:$PATH"` in the job itself.
-
-## History
-
-This repository was **`agentic-doc`**, the original Agentic Document
-Extraction SDK. The SDK is preserved unchanged — and no longer
-developed — on the
-[`legacy`](https://github.com/landing-ai/ade-cli/tree/legacy) branch;
-since 2026-07-31 this repo ships the ADE CLI.
+This repository was **`agentic-doc`**, the original Agentic Document Extraction
+SDK. That SDK is preserved unchanged, and no longer developed, on the
+[`legacy`](https://github.com/landing-ai/ade-cli/tree/legacy) branch. Since
+2026-07-31 this repository ships the ADE CLI.
 
 ## License
 
