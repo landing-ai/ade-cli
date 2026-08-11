@@ -88,9 +88,9 @@ def login(
     environment: str | None = typer.Option(None, "--env", help=_ENV_HELP),
     as_json: bool = JSON_FLAG,
 ) -> None:
-    """Ensure the target environment is logged in; --api-key
+    """Ensure the target environment is logged in; `--api-key`
     authenticates with a key directly ('-' prompts with hidden input).
-    Targets --env, else $ADE_ENV, else production — nothing is stored
+    Targets `--env`, else $ADE_ENV, else production — nothing is stored
     about the choice."""
     home = ade_home()
     resolved = resolve_target(home, environment, as_json=as_json)
@@ -870,7 +870,7 @@ def logout(
     ),
     as_json: bool = JSON_FLAG,
 ) -> None:
-    """Log out of one environment (the resolved target by default); --all
+    """Log out of one environment (the resolved target by default); `--all`
     clears every environment. Idempotent; OAuth refresh tokens are revoked
     best-effort first."""
     home = ade_home()

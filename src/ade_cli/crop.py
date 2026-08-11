@@ -199,9 +199,9 @@ def crop(
         None, "--download/--no-download",
         help="URL-parsed items: fetch the document from its recorded URL "
         "into the job item and crop from that copy — the parse itself "
-        "never gives the CLI the bytes (#169). This happens "
+        "never gives the CLI the bytes. This happens "
         "automatically when no copy is attached yet (a notice and "
-        "progress line land on stderr); --no-download skips the fetch, "
+        "progress line land on stderr); `--no-download` skips the fetch, "
         "and the crop then fails honestly (a crop has no empty-imagery "
         "fallback).",
     ),

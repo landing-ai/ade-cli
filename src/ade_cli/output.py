@@ -33,8 +33,8 @@ ID_ONLY_FLAG = typer.Option(
     False,
     "--id-only",
     help="Print only the id(s) this run produced, one per line — the "
-    "piping mode (JOB=$(ade parse -d f.pdf --id-only)). Takes precedence "
-    "over --json; errors and hints go to stderr.",
+    "piping mode (JOB=$(ade parse -d f.pdf `--id-only`)). Takes precedence "
+    "over `--json`; errors and hints go to stderr.",
 )
 
 # Machine-readable exit states, shared by every command: pending is a normal
