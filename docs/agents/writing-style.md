@@ -28,10 +28,11 @@ render a bare `--flag` as an em dash plus the flag name; agents need
 unambiguous literal boundaries; and terminal output prints backticks
 literally, which is already this CLI's voice.
 
-`tests/test_help_style.py` enforces the flag rule across the help
-surface's prose fields. Pre-formatted blocks are exempt: topic bodies
-and usage lines are terminal layouts and copy-pasteable commands, so
-leave them bare.
+`tests/test_help_style.py` enforces the flag and environment-variable
+rules across the help surface's prose fields. Write env vars as a
+backticked bare name (`ADE_ENV`, not `$ADE_ENV`). Pre-formatted blocks
+are exempt: topic bodies and usage lines are terminal layouts and
+copy-pasteable commands, so leave them bare.
 
 ## Relationship to the docs repo
 
