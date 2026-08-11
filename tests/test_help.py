@@ -311,3 +311,14 @@ def test_skill_teaches_pending_resume_and_json():
     assert "Always pass `--json`" in SKILL
     assert "same command" in SKILL  # the resume gesture
     assert '"status": "pending"' in SKILL
+
+
+def test_skill_hands_schema_authoring_to_the_build_schema_skill():
+    """ADR-0010: the schema gap is bridged in the skill layer — SKILL.md
+    routes schema authoring to the build-schema skill, names the one
+    trusted seam (the deliverable path), and carries the cost
+    disclosure an agent must surface before starting a run."""
+    assert "build-schema skill" in SKILL
+    assert "landing-ai/claude-skills" in SKILL
+    assert "deliverable/schema.json" in SKILL
+    assert "bills per iteration" in SKILL
