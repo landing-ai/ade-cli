@@ -20,14 +20,14 @@
     },
     {
       "name": "env overrides",
-      "rule": "ADE_HOME relocates the store; ADE_API_KEY overrides stored credentials; ADE_ENDPOINT overrides the stored endpoint."
+      "rule": "`ADE_HOME` relocates the store; `ADE_API_KEY` overrides stored credentials; `ADE_ENDPOINT` overrides the stored endpoint."
     }
   ],
   "commands": [
     {
       "name": "auth login",
       "usage": "ade auth login [options] [--json]",
-      "summary": "Ensure the target environment is logged in; `--api-key`\nauthenticates with a key directly ('-' prompts with hidden input).\nTargets `--env`, else $ADE_ENV, else production \u2014 nothing is stored\nabout the choice.",
+      "summary": "Ensure the target environment is logged in; `--api-key`\nauthenticates with a key directly ('-' prompts with hidden input).\nTargets `--env`, else `ADE_ENV`, else production \u2014 nothing is stored\nabout the choice.",
       "arguments": [],
       "flags": [
         {
@@ -49,7 +49,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+          "help": "Environment to target: dev, staging, production, eu (default: `ADE_ENV`, then production). Credentials are stored per environment."
         }
       ],
       "supports_json": true,
@@ -107,7 +107,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+          "help": "Environment to target: dev, staging, production, eu (default: `ADE_ENV`, then production). Credentials are stored per environment."
         }
       ],
       "supports_json": true,
@@ -128,7 +128,7 @@
           },
           {
             "key": "source",
-            "what": "env (ADE_API_KEY) | stored"
+            "what": "env (`ADE_API_KEY`) | stored"
           },
           {
             "key": "environment / endpoint / endpoint_source",
@@ -157,7 +157,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Log out of this environment: dev, staging, production, eu (default: $ADE_ENV, then production)."
+          "help": "Log out of this environment: dev, staging, production, eu (default: `ADE_ENV`, then production)."
         },
         {
           "flags": "--all",
@@ -206,7 +206,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+          "help": "Environment to target: dev, staging, production, eu (default: `ADE_ENV`, then production). Credentials are stored per environment."
         }
       ],
       "supports_json": true,
@@ -250,7 +250,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+          "help": "Environment to target: dev, staging, production, eu (default: `ADE_ENV`, then production). Credentials are stored per environment."
         }
       ],
       "supports_json": true,
@@ -288,7 +288,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+          "help": "Environment to target: dev, staging, production, eu (default: `ADE_ENV`, then production). Credentials are stored per environment."
         }
       ],
       "supports_json": true,
@@ -340,7 +340,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Environment to target: dev, staging, production, eu (default: $ADE_ENV, then production). Credentials are stored per environment."
+          "help": "Environment to target: dev, staging, production, eu (default: `ADE_ENV`, then production). Credentials are stored per environment."
         }
       ],
       "supports_json": true,
@@ -398,7 +398,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Log out of this environment: dev, staging, production, eu (default: $ADE_ENV, then production)."
+          "help": "Log out of this environment: dev, staging, production, eu (default: `ADE_ENV`, then production)."
         },
         {
           "flags": "--all",
@@ -593,7 +593,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Environment to run against: dev, staging, production, eu (default: $ADE_ENV, then production). Environments keep separate results \u2014 the job item id includes the environment."
+          "help": "Environment to run against: dev, staging, production, eu (default: `ADE_ENV`, then production). Environments keep separate results \u2014 the job item id includes the environment."
         },
         {
           "flags": "--wait",
@@ -773,7 +773,7 @@
           "metavar": "TEXT",
           "required": false,
           "default": null,
-          "help": "Environment to run against: dev, staging, production, eu (default: $ADE_ENV, then production). The JOB_ITEM_ID form inherits the parse item's environment instead \u2014 its server-side parse job only exists there \u2014 and a conflicting `--env` is refused."
+          "help": "Environment to run against: dev, staging, production, eu (default: `ADE_ENV`, then production). The JOB_ITEM_ID form inherits the parse item's environment instead \u2014 its server-side parse job only exists there \u2014 and a conflicting `--env` is refused."
         },
         {
           "flags": "--wait",
@@ -1454,8 +1454,8 @@
     }
   ],
   "store": {
-    "home": "~/.ade (ADE_HOME overrides)",
-    "note": "On-disk records (meta.json, job.json, parse/ref.json) spell the server-side run id as job_id \u2014 the wire contract's name for the same value --json payloads report as run_id. Neither is the job item id (the jobs/<id>/ folder name).",
+    "home": "~/.ade (`ADE_HOME` overrides)",
+    "note": "On-disk records (meta.json, job.json, parse/ref.json) spell the server-side run id as job_id \u2014 the wire contract's name for the same value `--json` payloads report as run_id. Neither is the job item id (the jobs/<id>/ folder name).",
     "layout": [
       {
         "path": "~/.ade/config.json",

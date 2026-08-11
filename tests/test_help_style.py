@@ -12,8 +12,9 @@ the behavior and leaves the number to the commit history.
 Scope: every prose field in the help surface. Topic bodies are exempt:
 they are pre-formatted terminal layouts (aligned flag columns, literal
 example commands) where backticks would corrupt the rendering. Other
-inline-code kinds (paths, commands, env vars) stay convention; a test
-cannot reliably tell a path from prose, but a long flag is unmistakable.
+inline-code kinds (paths, commands) stay convention; a test cannot
+reliably tell a path from prose, but a long flag or an ``ADE_*``
+environment variable is unmistakable, so both are enforced.
 """
 
 from __future__ import annotations
@@ -26,6 +27,12 @@ import pytest
 # A long flag in prose that is not already inside a backtick span.
 CODE_SPAN = re.compile(r"`[^`]*`")
 BARE_FLAG = re.compile(r"(?<![\w`-])--[a-z][a-z0-9-]*")
+# An ADE_* environment variable in prose. Matches a $-prefixed mention
+# too: the style is a backticked bare name (`ADE_ENV`), not `$ADE_ENV`.
+BARE_ENV_VAR = re.compile(r"(?<![\w`])ADE_[A-Z0-9_]+")
+# The $ notation anywhere, including inside a backtick span, where the
+# code-span strip would otherwise hide `$ADE_ENV` from BARE_ENV_VAR.
+DOLLAR_ENV_VAR = re.compile(r"\$ADE_[A-Z0-9_]+")
 # An issue reference: "(#169)" or a standalone "#169". The lookbehind
 # spares URL fragments, which are legitimate prose (view.html#element).
 ISSUE_REF = re.compile(r"(?<![\w/=.])#\d+\b")
@@ -56,8 +63,13 @@ def _prose_strings(reference: dict):
         if note:
             yield f"{where}.result.note", note
     # topics[].body is deliberately absent: pre-formatted terminal text.
+    # Titles are prose, so they are scanned.
+    for topic in reference["topics"]:
+        yield f"topics[{topic['name']}].title", topic["title"]
     for state in reference["exit_states"]:
         yield f"exit_states[{state['name']}]", state["meaning"]
+    yield "store.home", reference["store"]["home"]
+    yield "store.note", reference["store"]["note"]
     for entry in reference["store"]["layout"]:
         yield f"store[{entry['path']}]", entry["what"]
 
@@ -71,6 +83,21 @@ def test_flags_in_help_prose_are_backticked(reference):
             offenders.append(f"{locator}: bare {match}")
     assert not offenders, (
         "Bare flags in help prose; wrap them in backticks "
+        "(docs/agents/writing-style.md):\n" + "\n".join(offenders)
+    )
+
+
+def test_env_vars_in_help_prose_are_backticked(reference):
+    """Every ADE_* env var in help prose is backticked, with no $."""
+    offenders = []
+    for locator, text in _prose_strings(reference):
+        stripped = CODE_SPAN.sub("", text)
+        for match in BARE_ENV_VAR.findall(stripped):
+            offenders.append(f"{locator}: bare {match}")
+        for match in DOLLAR_ENV_VAR.findall(text):
+            offenders.append(f"{locator}: {match}; write `{match[1:]}`")
+    assert not offenders, (
+        "Environment variables in help prose are a backticked bare name "
         "(docs/agents/writing-style.md):\n" + "\n".join(offenders)
     )
 

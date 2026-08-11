@@ -331,7 +331,7 @@ RESULTS: dict[str, dict] = {
             ("authenticated", "false (exit 1) when the target has no credential"),
             ("method", "api_key | oauth"),
             ("credential", "masked credential"),
-            ("source", "env (ADE_API_KEY) | stored"),
+            ("source", "env (`ADE_API_KEY`) | stored"),
             ("environment / endpoint / endpoint_source", "the resolved target"),
             ("other_environments", "every other environment holding a credential"),
             ("expires_at / expires_in_seconds / refresh_token / organization",
@@ -485,8 +485,8 @@ CONVENTIONS = [
     ),
     (
         "env overrides",
-        "ADE_HOME relocates the store; ADE_API_KEY overrides stored "
-        "credentials; ADE_ENDPOINT overrides the stored endpoint.",
+        "`ADE_HOME` relocates the store; `ADE_API_KEY` overrides stored "
+        "credentials; `ADE_ENDPOINT` overrides the stored endpoint.",
     ),
 ]
 
@@ -806,12 +806,12 @@ def help_command(
         "topics": TOPICS,
         "exit_states": EXIT_STATES,
         "store": {
-            "home": "~/.ade (ADE_HOME overrides)",
+            "home": "~/.ade (`ADE_HOME` overrides)",
             # One vocabulary note for every on-disk record: job_id there
             # is the wire's spelling of the run id.
             "note": "On-disk records (meta.json, job.json, parse/ref.json) "
             "spell the server-side run id as job_id — the wire contract's "
-            "name for the same value --json payloads report as run_id. "
+            "name for the same value `--json` payloads report as run_id. "
             "Neither is the job item id (the jobs/<id>/ folder name).",
             "layout": STORE_LAYOUT,
         },

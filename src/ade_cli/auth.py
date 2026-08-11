@@ -64,7 +64,7 @@ auth_app = typer.Typer(name="auth", no_args_is_help=True, help="Authenticate ade
 _ENV_NAMES = ", ".join(ENVIRONMENTS)
 
 _ENV_HELP = (
-    f"Environment to target: {_ENV_NAMES} (default: $ADE_ENV, then "
+    f"Environment to target: {_ENV_NAMES} (default: `ADE_ENV`, then "
     "production). Credentials are stored per environment."
 )
 
@@ -90,7 +90,7 @@ def login(
 ) -> None:
     """Ensure the target environment is logged in; `--api-key`
     authenticates with a key directly ('-' prompts with hidden input).
-    Targets `--env`, else $ADE_ENV, else production — nothing is stored
+    Targets `--env`, else `ADE_ENV`, else production — nothing is stored
     about the choice."""
     home = ade_home()
     resolved = resolve_target(home, environment, as_json=as_json)
@@ -863,7 +863,7 @@ def logout(
         None,
         "--env",
         help=f"Log out of this environment: {_ENV_NAMES} "
-        "(default: $ADE_ENV, then production).",
+        "(default: `ADE_ENV`, then production).",
     ),
     all_envs: bool = typer.Option(
         False, "--all", help="Log out of every environment at once."

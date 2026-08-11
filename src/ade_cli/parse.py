@@ -143,7 +143,7 @@ def parse(
     environment: str | None = typer.Option(
         None, "--env",
         help=f"Environment to run against: {', '.join(ENVIRONMENTS)} "
-        "(default: $ADE_ENV, then production). Environments keep separate "
+        "(default: `ADE_ENV`, then production). Environments keep separate "
         "results — the job item id includes the environment.",
     ),
     wait: float = typer.Option(600.0, "--wait", help="Poll budget in seconds."),
