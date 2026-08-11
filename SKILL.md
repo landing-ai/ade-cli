@@ -124,6 +124,16 @@ Prefer the explicit two-step (`parse -d`, then `extract JOB_ITEM_ID`) when
 you want the same parse to feed several schemas — the id makes the reuse
 visible.
 
+## Schema authoring is not for agents driving this CLI
+
+`ade schema build` (and the offer a human sees after an interactive
+parse) launches a *foreground AI-agent session* running the build-schema
+skill — it requires a real terminal on every stream and never fires
+under `--json`, `--id-only`, or inside an agent host or CI. If you are
+an agent and the user needs a schema authored, invoke the **build-schema
+skill** (the `landingai-ade` plugin of landing-ai/claude-skills)
+directly rather than shelling out to `ade schema build`.
+
 ## Pending and resume
 
 Wait expiry is a normal outcome, not an error. If the poll budget

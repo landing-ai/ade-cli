@@ -446,3 +446,18 @@ def test_unrelated_http_errors_carry_no_update_hint(cli, tmp_path):
     payload = json.loads(result.stdout)
     assert payload["error"] == "http"
     assert "hint" not in payload
+
+
+def test_reexec_argv_targets_this_cli(monkeypatch):
+    """The shared re-exec seam (viewer daemons, the schema-build extract
+    handoff): frozen binaries take subcommands directly, a normal install
+    goes through ``python -m ade_cli``."""
+    import sys
+
+    from ade_cli.update import reexec_argv
+
+    assert reexec_argv("extract", "abc") == [
+        sys.executable, "-m", "ade_cli", "extract", "abc",
+    ]
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert reexec_argv("view", "--open") == [sys.executable, "view", "--open"]

@@ -28,6 +28,39 @@ def _no_getchar() -> str:
     raise AssertionError("unscripted raw key read")
 
 
+def _which_none(name: str) -> str | None:
+    """Default PATH fake: no agent CLI exists unless a test says so."""
+    return None
+
+
+def _fake_which(names: dict[str, str]) -> Callable[[str], str | None]:
+    return lambda name: names.get(name)
+
+
+def _no_run_agent(argv: list[str], cwd: Path | None = None) -> int:
+    raise AssertionError(f"unscripted subprocess run: {argv}")
+
+
+class RecordedRuns:
+    """Attached-subprocess fake: records ``(argv, cwd)`` and plays back a
+    per-call script of side effects (e.g. writing the skill's deliverable
+    into the workspace) or plain exit codes. Running dry is a harness
+    failure, mirroring the transport and browser fakes."""
+
+    def __init__(self, script: list[int | Callable[[list[str], Path | None], int]]):
+        self.calls: list[tuple[list[str], Path | None]] = []
+        self._script = list(script)
+
+    def __call__(self, argv: list[str], cwd: Path | None = None) -> int:
+        self.calls.append((list(argv), cwd))
+        if not self._script:
+            raise AssertionError(f"ran out of scripted subprocess runs: {argv}")
+        step = self._script.pop(0)
+        if callable(step):
+            return step(list(argv), cwd)
+        return step
+
+
 def _scripted_keys(keys: list[str | BaseException]) -> Callable[[], str]:
     """A raw-key reader that plays back a script — an exception entry is
     raised in place of a key (e.g. OSError for a raw-mode failure). Running
@@ -124,6 +157,8 @@ class Cli:
         env: dict[str, str | None] | None = None,
         browser: Callable[[str], bool] | None = None,
         keys: list[str | BaseException] | None = None,
+        which: dict[str, str] | None = None,
+        run: Callable[..., int] | None = None,
     ):
         # Pin ADE_HOME to the temp store and shield the run from ambient
         # ADE_* vars and surface markers (the machine running the tests
@@ -162,6 +197,8 @@ class Cli:
                 clock=self.clock,
                 browser=browser or _no_browser,
                 getchar=_scripted_keys(keys) if keys is not None else _no_getchar,
+                which=_fake_which(which) if which is not None else _which_none,
+                run_agent=run or _no_run_agent,
                 stdout_tty=self.stdout_tty,
                 stderr_tty=self.stderr_tty,
                 stdin_tty=self.stdin_tty,

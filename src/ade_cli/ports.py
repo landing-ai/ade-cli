@@ -1,5 +1,6 @@
 """Injected ports: the HTTP transport, the clock, terminal-ness, the
-browser opener, and the raw-key reader.
+browser opener, the raw-key reader, PATH lookup, and the attached
+subprocess runner.
 
 Production builds real ones; tests inject fakes through the CLI seam
 (``ctx.obj``). No command in this slice performs HTTP, but every command
@@ -8,10 +9,13 @@ runs against these ports so the whole build shares one harness.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import sys
 import time
 import webbrowser
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Protocol
 
 import httpx
@@ -49,6 +53,13 @@ def open_browser(url: str) -> bool:
         return False
 
 
+def run_attached(argv: list[str], cwd: Path | None = None) -> int:
+    """Run a foreground child that inherits this process's stdio — the
+    interactive agent session and the extract re-exec both need the real
+    terminal, so nothing is captured or redirected."""
+    return subprocess.run(argv, cwd=cwd).returncode
+
+
 @dataclass
 class Ports:
     transport: httpx.BaseTransport = field(default_factory=httpx.HTTPTransport)
@@ -58,6 +69,13 @@ class Ports:
     # (the vendored click getchar — real raw-mode reads); tests inject a
     # scripted reader.
     getchar: Callable[[], str] | None = None
+    # PATH lookup for agent-CLI detection; tests inject a fake resolving
+    # only the names the test declares present.
+    which: Callable[[str], str | None] = shutil.which
+    # Foreground subprocess inheriting this process's stdio, returning the
+    # exit code; tests inject a recorder — the suite never launches a
+    # real process.
+    run_agent: Callable[..., int] = run_attached
     # Terminal-ness of the real streams, injectable because a test runner's
     # captured streams are never ttys. None means detect.
     stdout_tty: bool | None = None

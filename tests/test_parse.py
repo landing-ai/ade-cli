@@ -765,3 +765,206 @@ def test_keep_copy_on_a_cached_hit_attaches_late(cli):
     assert payload["kept_copy"] is True
     item_dir_ = cli.home / "jobs" / payload["job_item_id"]
     assert (item_dir_ / "document.pdf").read_bytes() == pdf
+
+
+# ------------------------------------------------- the post-parse schema offer
+
+
+OFFER = "Build an extraction schema"
+
+
+def offer_tty(cli):
+    """The offer needs a real terminal on all three streams."""
+    cli.stdin_tty = cli.stdout_tty = cli.stderr_tty = True
+    return cli
+
+
+def seed_parse(cli, document):
+    cli.transport.respond(202, {"job_id": JOB_ID})
+    cli.transport.respond(200, completed_job())
+
+
+def test_offer_fires_on_a_tty_and_bare_enter_declines(cli, document):
+    offer_tty(cli)
+    seed_parse(cli, document)
+    # Enter confirms the default option, which is Exit — the offer never
+    # costs a keystroke of the old behavior. keys are scripted: any extra
+    # read would fail the harness, proving the flow ends at the menu.
+    result = cli.invoke("parse", "-d", str(document), env=AUTH_ENV, keys=["\r"])
+    assert result.exit_code == 0, result.stdout
+    assert OFFER in result.stderr
+    assert "Open the viewer" in result.stderr  # all three doors are offered
+    assert "next:" in result.stdout  # the plain hint still printed
+
+
+def test_exit_restates_both_commands(cli, document):
+    """Exiting is not a dead end: the menu scrolled the summary's next:
+    line away, so the choice that declines must hand back both commands
+    with an id that resolves."""
+    offer_tty(cli)
+    seed_parse(cli, document)
+    result = cli.invoke("parse", "-d", str(document), env=AUTH_ENV, keys=["\r"])
+    assert result.exit_code == 0, result.stdout
+    assert "ade schema build " in result.stderr
+    assert "ade view " in result.stderr and "--open" in result.stderr
+    # The hinted id is runnable, not decorative.
+    ref = result.stderr.split("ade schema build ", 1)[1].split()[0]
+    found = cli.invoke("find", "--job", ref, "--json")
+    assert found.exit_code == 0, found.stdout
+
+
+def test_offer_opens_the_viewer(cli, document):
+    """The second door: a re-exec of this CLI, so the viewer inherits the
+    terminal and the run ends as `ade view` ended."""
+    import sys as _sys
+
+    from conftest import RecordedRuns
+
+    offer_tty(cli)
+    seed_parse(cli, document)
+    runs = RecordedRuns([0])
+    result = cli.invoke(
+        "parse", "-d", str(document), env=AUTH_ENV, keys=["2", "\r"], run=runs
+    )
+    assert result.exit_code == 0, result.stdout
+    argv, _cwd = runs.calls[0]
+    assert argv[:3] == [_sys.executable, "-m", "ade_cli"]
+    assert argv[3] == "view" and argv[-1] == "--open"
+
+
+def test_viewer_failure_ends_the_run_as_view_ended(cli, document):
+    from conftest import RecordedRuns
+
+    offer_tty(cli)
+    seed_parse(cli, document)
+    result = cli.invoke(
+        "parse", "-d", str(document), env=AUTH_ENV, keys=["2", "\r"],
+        run=RecordedRuns([3]),
+    )
+    assert result.exit_code == 3
+
+
+def test_offer_typed_fallback_offers_all_three(cli, document):
+    """TERM=dumb (and any terminal whose raw mode fails) gets the same
+    three choices as a numbered prompt."""
+    offer_tty(cli)
+    seed_parse(cli, document)
+    result = cli.invoke(
+        "parse", "-d", str(document), env={**AUTH_ENV, "TERM": "dumb"}, input="3\n"
+    )
+    assert result.exit_code == 0, result.stdout
+    for label in ("1) Build an extraction schema", "2) Open the viewer", "3) Exit"):
+        assert label in result.stderr
+    assert "ade schema build " in result.stderr
+
+
+def test_offer_esc_declines_without_failing_the_parse(cli, document):
+    offer_tty(cli)
+    seed_parse(cli, document)
+    result = cli.invoke("parse", "-d", str(document), env=AUTH_ENV, keys=["\x1b"])
+    assert result.exit_code == 0, result.stdout
+    assert "ade schema build " in result.stderr  # aborting still teaches
+
+
+def test_offer_fires_on_the_cached_path_too(cli, document):
+    offer_tty(cli)
+    seed_parse(cli, document)
+    assert cli.invoke(
+        "parse", "-d", str(document), env=AUTH_ENV, keys=["\r"]
+    ).exit_code == 0
+    cached = cli.invoke("parse", "-d", str(document), env=AUTH_ENV, keys=["\r"])
+    assert cached.exit_code == 0, cached.stdout
+    assert OFFER in cached.stderr
+
+
+def test_offer_accept_without_an_agent_is_nonfatal(cli, document):
+    offer_tty(cli)
+    seed_parse(cli, document)
+    # "1" jumps the pointer, Enter confirms — accept; no agent CLI exists
+    # (the default which resolves nothing), so the offer teaches the
+    # install and the parse still succeeds.
+    result = cli.invoke(
+        "parse", "-d", str(document), env=AUTH_ENV, keys=["1", "\r"]
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "no AI agent CLI found" in result.stderr
+
+
+def test_offer_accept_runs_the_handoff(cli, document):
+    from conftest import RecordedRuns
+
+    offer_tty(cli)
+    seed_parse(cli, document)
+
+    def deliver(argv, cwd):
+        (cwd / "deliverable").mkdir(parents=True)
+        (cwd / "deliverable" / "schema.json").write_text("{}")
+        return 0
+
+    runs = RecordedRuns([deliver])
+    result = cli.invoke(
+        "parse", "-d", str(document), env=AUTH_ENV,
+        keys=["1", "\r"],
+        which={"claude": "/usr/local/bin/claude"},
+        run=runs,
+        input="invoice totals\n\n\nn\n",  # intent, skip, skip, no extract
+    )
+    assert result.exit_code == 0, result.stdout
+    argv, cwd = runs.calls[0]
+    assert argv[0] == "claude" and "invoice totals" in argv[1]
+    assert "Schema built" in result.stdout
+
+
+def test_offer_never_fires_in_machine_or_hosted_modes(cli, document):
+    offer_tty(cli)
+    seed_parse(cli, document)
+    # --json: stdout is payload-only. No keys are scripted — a menu read
+    # would fail the harness.
+    result = cli.invoke("parse", "-d", str(document), "--json", env=AUTH_ENV)
+    assert result.exit_code == 0
+    assert OFFER not in result.stderr
+
+    for env in ({"CLAUDECODE": "1"}, {"CI": "1"}):
+        cached = cli.invoke("parse", "-d", str(document), env={**AUTH_ENV, **env})
+        assert cached.exit_code == 0, cached.stdout
+        assert OFFER not in cached.stderr
+
+
+def test_offer_never_fires_without_a_full_tty(cli, document):
+    cli.stdin_tty = False
+    cli.stdout_tty = True
+    cli.stderr_tty = True
+    seed_parse(cli, document)
+    result = cli.invoke("parse", "-d", str(document), env=AUTH_ENV)
+    assert result.exit_code == 0
+    assert OFFER not in result.stderr
+
+
+def test_offer_respects_the_config_opt_out(cli, document):
+    offer_tty(cli)
+    seed_parse(cli, document)
+    cli.home.mkdir(parents=True, exist_ok=True)
+    (cli.home / "config.json").write_text('{"schema_prompt": false}')
+    result = cli.invoke("parse", "-d", str(document), env=AUTH_ENV)
+    assert result.exit_code == 0, result.stdout
+    assert OFFER not in result.stderr
+
+
+def test_offer_id_only_stays_silent(cli, document):
+    offer_tty(cli)
+    seed_parse(cli, document)
+    result = cli.invoke("parse", "-d", str(document), "--id-only", env=AUTH_ENV)
+    assert result.exit_code == 0
+    assert OFFER not in result.stderr
+
+
+def test_offer_survives_a_corrupt_config(cli, document):
+    """A hand-edited config.json with invalid JSON must never fail a
+    parse that already succeeded and billed."""
+    offer_tty(cli)
+    seed_parse(cli, document)
+    cli.home.mkdir(parents=True, exist_ok=True)
+    (cli.home / "config.json").write_text("{not valid json")
+    result = cli.invoke("parse", "-d", str(document), env=AUTH_ENV, keys=["\r"])
+    assert result.exit_code == 0, result.stdout
+    assert OFFER in result.stderr

@@ -35,7 +35,6 @@ import hashlib
 import json
 import os
 import subprocess
-import sys
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
@@ -48,6 +47,7 @@ from .crop import DEFAULT_CROP_DPI, crop_element_to_file
 from .history import resolve_or_exit
 from .output import EXIT_FAILED, EXIT_USAGE, JSON_FLAG, emit, exit_with, tilde
 from .store import JobStore
+from .update import reexec_argv
 from .parse import _parse_pages
 from .raster import CropError, render_source, source_drift_note
 
@@ -809,15 +809,6 @@ def _latest_viewable(store: JobStore, records: list[dict]) -> str | None:
     return None
 
 
-def _reexec_argv(*command: str) -> list[str]:
-    """argv that re-runs this CLI: a PyInstaller binary (sys.frozen) takes
-    subcommands directly; a normal install goes through ``python -m ade_cli``
-    (the only re-exec an importable package can promise)."""
-    if getattr(sys, "frozen", False):
-        return [sys.executable, *command]
-    return [sys.executable, "-m", "ade_cli", *command]
-
-
 def _needs_chunks(store: JobStore, record: dict) -> bool:
     """Whether a parse item's page-imagery chunks are missing or stale —
     cheap (meta.json plus one first-line read per chunk file), so every
@@ -876,7 +867,7 @@ def _spawn_builder(store: JobStore, records: list[dict]) -> bool:
     if not needs:
         return False
     subprocess.Popen(
-        _reexec_argv("view", "--sync-viewers"),
+        reexec_argv("view", "--sync-viewers"),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
@@ -891,7 +882,7 @@ def _spawn_server(port: int) -> None:
     flag, fully disowned. The daemon settles the final port itself and
     records it in server.json; the caller watches for that."""
     subprocess.Popen(
-        _reexec_argv("view", "--serve-daemon", str(port)),
+        reexec_argv("view", "--serve-daemon", str(port)),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,

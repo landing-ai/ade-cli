@@ -20,7 +20,9 @@ assertions are exact, not model-lenient — except extraction values,
 where only the trivially-quoted invoice number is asserted.
 
 Parse and extract bill real credits (one parse + one extract per run,
-per OS). Everything else is served from the local store.
+per OS). Everything else is served from the local store — including the
+schema-build handoff's chained extraction, which reuses the same schema
+and parse item as the direct extract test and so dedups to it.
 """
 
 from __future__ import annotations
@@ -50,10 +52,36 @@ FIXTURE_LINES = [
 ]
 INVOICE_NUMBER = "INV-2026-0806"
 
+# One schema for both extract paths — the direct `extract` test and the
+# one the schema-build handoff runs. Identical schema + identical parse
+# item means the handoff's extraction dedups to the item the earlier test
+# already paid for, so the added coverage bills nothing.
+SCHEMA_JSON = json.dumps(
+    {
+        "type": "object",
+        "properties": {
+            "invoice_number": {
+                "type": "string",
+                "description": "The invoice number, verbatim.",
+            }
+        },
+        "required": ["invoice_number"],
+    }
+)
+
 # Generous per-command ceiling: parse/extract poll server-side runs (the
 # CLI's own --wait default is 600s). A hang, not slowness, is the failure
 # this guards.
 COMMAND_TIMEOUT = 900.0
+
+
+def _base_env(home: Path) -> dict[str, str]:
+    """Every ADE_* variable is dropped so a run can't inherit a
+    developer's ADE_API_KEY/ADE_ENV/ADE_ENDPOINT — the stored credential
+    written by the login test is the only auth in play."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ADE_")}
+    env["ADE_HOME"] = str(home)
+    return env
 
 
 def run_ade(
@@ -63,20 +91,64 @@ def run_ade(
     stdin: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the real CLI out of process, homed at a temp store, targeting
-    production. Every ADE_* variable is dropped so the run can't inherit a
-    developer's ADE_API_KEY/ADE_ENV/ADE_ENDPOINT — the stored credential
-    written by the login test is the only auth in play."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("ADE_")}
-    env["ADE_HOME"] = str(home)
+    production."""
     return subprocess.run(
         [sys.executable, "-m", "ade_cli", *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env=env,
+        env=_base_env(home),
         input=stdin,
         timeout=COMMAND_TIMEOUT,
     )
+
+
+def run_ade_pty(
+    args: list[str],
+    home: Path,
+    *,
+    responses: str,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[int, str]:
+    """Run the real CLI attached to a real pty and answer its prompts.
+
+    ``schema build`` refuses to run without a terminal on every stream —
+    it hands those streams to an interactive agent session — so the only
+    honest way to drive it is a genuine pty. ``TERM=dumb`` selects the
+    typed fallback over the arrow-key widget, which makes the exchange
+    line-oriented: canonical mode buffers ``responses`` until each prompt
+    reads its line, so nothing has to race the child.
+    """
+    import pty
+
+    env = _base_env(home)
+    env["TERM"] = "dumb"
+    env.update(extra_env or {})
+    master, slave = pty.openpty()
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "ade_cli", *args],
+            stdin=slave, stdout=slave, stderr=slave, env=env, close_fds=True,
+        )
+        os.close(slave)
+        slave = -1
+        os.write(master, responses.encode())
+        chunks: list[bytes] = []
+        while True:
+            try:
+                data = os.read(master, 4096)
+            except OSError:  # the child closed the pty: EOF on this platform
+                break
+            if not data:
+                break
+            chunks.append(data)
+        return proc.wait(timeout=COMMAND_TIMEOUT), b"".join(chunks).decode(
+            "utf-8", "replace"
+        )
+    finally:
+        if slave != -1:
+            os.close(slave)
+        os.close(master)
 
 
 def payload_of(result: subprocess.CompletedProcess[str]) -> dict:
@@ -205,21 +277,9 @@ def test_crop_renders_every_element_to_png(
 
 
 def test_extract_pulls_the_invoice_number(parsed: dict, logged_in: Path) -> None:
-    schema = json.dumps(
-        {
-            "type": "object",
-            "properties": {
-                "invoice_number": {
-                    "type": "string",
-                    "description": "The invoice number, verbatim.",
-                }
-            },
-            "required": ["invoice_number"],
-        }
-    )
     payload = payload_of(
         run_ade(
-            ["extract", parsed["job_item_id"], "--schema", schema, "--json"],
+            ["extract", parsed["job_item_id"], "--schema", SCHEMA_JSON, "--json"],
             logged_in,
         )
     )
@@ -228,6 +288,105 @@ def test_extract_pulls_the_invoice_number(parsed: dict, logged_in: Path) -> None
     assert payload["parse_job_item_id"] == parsed["job_item_id"]
     assert payload["job_item_id"] != parsed["job_item_id"]
     assert payload["extraction"]["invoice_number"] == INVOICE_NUMBER
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="pty is POSIX-only; the handoff needs a real terminal to drive",
+)
+def test_schema_build_hands_off_to_an_agent_and_chains_into_extract(
+    parsed: dict, logged_in: Path, tmp_path: Path
+) -> None:
+    """The whole parse -> schema -> extract chain, out of process.
+
+    The offline suite fakes the subprocess port, so this is the only test
+    that exercises the real seam: a real agent executable found on PATH,
+    spawned attached to a real terminal, writing the skill's
+    ``deliverable/schema.json`` — then ade's own re-exec running that
+    schema against production. The stand-in agent is a shell script (the
+    real skill loop needs a model and a human reviewer); everything ade
+    owns around it is real.
+    """
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    prompt_capture = tmp_path / "seeded-prompt.txt"
+    agent = fake_bin / "claude"
+    # Records the prompt it was handed, then leaves the deliverable the
+    # skill would leave. `$1` is the seeded prompt; cwd is the workspace.
+    agent.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s" "$1" > {prompt_capture}\n'
+        "mkdir -p deliverable\n"
+        f"cat > deliverable/schema.json <<'SCHEMA'\n{SCHEMA_JSON}\nSCHEMA\n"
+    )
+    agent.chmod(0o755)
+
+    workspace = tmp_path / "engagement"
+    code, output = run_ade_pty(
+        [
+            "schema", "build", parsed["job_item_id"],
+            "--intent", "the invoice number",
+            "--workspace", str(workspace),
+        ],
+        logged_in,
+        # skip the baseline schema, skip the golden set, run the extract
+        responses="\n\ny\n",
+        extra_env={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+    )
+    assert code == 0, output
+
+    # The agent was launched with everything the skill needs, and nothing
+    # it must negotiate itself.
+    seeded = prompt_capture.read_text(encoding="utf-8")
+    assert parsed["job_item_id"] in seeded  # the full id, not a prefix
+    assert "the invoice number" in seeded
+    assert parsed["store_dir"] in seeded
+    assert "never re-parse or pass --force" in seeded
+    assert str(workspace) in seeded
+
+    # The deliverable was found where the skill leaves it, and named.
+    schema_path = workspace / "deliverable" / "schema.json"
+    assert schema_path.is_file()
+    assert str(schema_path) in output
+
+    # The chained extraction really ran against production: re-running it
+    # is a free cache hit that lets us assert the payload exactly.
+    payload = payload_of(
+        run_ade(
+            [
+                "extract", parsed["job_item_id"],
+                "--schema", str(schema_path), "--json",
+            ],
+            logged_in,
+        )
+    )
+    assert payload["cached"] is True  # the handoff's own run produced it
+    assert payload["parse_job_item_id"] == parsed["job_item_id"]
+    assert payload["extraction"]["invoice_number"] == INVOICE_NUMBER
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="pty is POSIX-only (see the test above)"
+)
+def test_schema_build_without_an_agent_says_how_to_install_one(
+    parsed: dict, logged_in: Path, tmp_path: Path
+) -> None:
+    """The other half of the real seam: PATH lookup. With no agent CLI
+    installed the handoff must fail legibly rather than hang or traceback
+    — and must never reach the store."""
+    empty_bin = tmp_path / "empty-bin"
+    empty_bin.mkdir()
+    code, output = run_ade_pty(
+        ["schema", "build", parsed["job_item_id"], "--intent", "the invoice number"],
+        logged_in,
+        responses="",
+        # A PATH with no agent on it (python still resolves: we invoke it
+        # by absolute path via sys.executable).
+        extra_env={"PATH": str(empty_bin)},
+    )
+    assert code == 1, output
+    assert "no AI agent CLI found" in output
+    assert "@anthropic-ai/claude-code" in output
 
 
 def test_logout_clears_the_credential(logged_in: Path) -> None:
