@@ -110,6 +110,40 @@ recorded run instead of re-billing under the new organization.
    selection crops in one call and returns `crops[]`; never loop `find`
    into `crop` yourself.
 
+## No schema yet? Invoke the build-schema skill
+
+The loop assumes a JSON Schema exists; authoring one is its own
+discipline. When the user needs a schema authored, improved, or
+validated, do not hand-write one and eyeball the output — invoke the
+**build-schema skill** (the `landingai-ade` plugin of
+[landing-ai/claude-skills](https://github.com/landing-ai/claude-skills))
+and let it run its loop. If the plugin is not installed, use a local
+copy of the skill if one exists; otherwise shallow-clone that repo and
+follow `plugins/landingai-ade/skills/build-schema/SKILL.md`.
+
+The skill drives this same CLI through measured iteration: it
+negotiates per-field accuracy targets with the user, validates every
+schema version with a real extraction run, scores against
+reviewer-confirmed ground truth, and stops only converged with numbers
+or blocked with evidence. It delivers the final schema at
+`<workspace>/deliverable/schema.json` — hand that straight to step 3:
+
+```sh
+ade extract JOB_ITEM_ID --schema WORKSPACE/deliverable/schema.json --json
+```
+
+Two things to surface before starting a run:
+
+- **It bills per iteration, not once.** Every schema version is
+  validated by a real extraction, so a converging loop costs roughly
+  one extraction per document per iteration. The final extract above
+  is normally a free cache hit — the skill's last iteration already
+  ran it.
+- **Seed it with what the store already holds.** Pass along the
+  `job_item_id` of any parse you already ran (and its environment) —
+  re-runs are free, so the skill authors from the cached parse instead
+  of re-billing one.
+
 ## Reuse posture — parse bills once
 
 Every parse the CLI ever runs is a reusable job item. Given a document
