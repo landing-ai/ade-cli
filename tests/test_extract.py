@@ -830,6 +830,129 @@ def test_extract_json_carries_the_contract_fields(cli, document, schema_file):
     assert payload["extraction"] == stored["extraction"]
 
 
+# --- payload shape parity (#189): one summary, both paths ---
+
+# How this invocation got its parse is a property of the invocation, not of
+# the payload's shape: a fresh `extract -d` that had to parse first reports
+# `parsed_first`, and its cached re-run reports the `reused_parse` it now
+# finds. Every other key is the same on both paths.
+PARSE_PROVENANCE = {"parsed_first", "reused_parse"}
+
+
+def assert_same_shape(fresh, cached):
+    """Fresh and cached `--json` payloads are the same payload — same keys,
+    same values, `cached` apart. The extraction rides inline on both: the
+    documented contract is that stdout carries the whole result, so a fresh
+    run may never reduce to a summary that sends the caller to disk (#189).
+    """
+    assert set(fresh) - PARSE_PROVENANCE == set(cached) - PARSE_PROVENANCE
+    assert {k for k in set(fresh) & set(cached) if fresh[k] != cached[k]} == {"cached"}
+    assert fresh["cached"] is False and cached["cached"] is True
+    assert isinstance(fresh["extraction"], dict) and fresh["extraction"]
+
+
+def extract_twice(cli, *args, result=None):
+    """One invocation run fresh, then re-run once the item is cached."""
+    fresh = complete_extract(cli, *args, result=result)
+    again = cli.invoke("extract", *args, "--json", env=AUTH_ENV)
+    assert again.exit_code == 0, again.stdout
+    return fresh, json.loads(again.stdout)
+
+
+def test_fresh_and_cached_payloads_are_the_same_shape(cli, document, schema_file):
+    parse_id = parse_doc(cli, document)
+
+    fresh, cached = extract_twice(cli, parse_id, "--schema", str(schema_file))
+
+    assert_same_shape(fresh, cached)
+    (extract_dir,) = extract_item_dirs(cli)
+    stored = json.loads((extract_dir / "extract.json").read_text())
+    assert fresh["extraction"] == cached["extraction"] == stored["extraction"]
+
+
+def test_fresh_and_cached_markdown_payloads_are_the_same_shape(
+    cli, tmp_path, schema_file
+):
+    # Bring-your-own markdown: spans-only evidence, no parse referenced —
+    # the degraded join must not change which keys the payload carries.
+    notes = tmp_path / "notes.md"
+    notes.write_text(MARKDOWN)
+
+    fresh, cached = extract_twice(cli, "--markdown", str(notes), "--schema", str(schema_file))
+
+    assert_same_shape(fresh, cached)
+    assert fresh["evidence"]["kind"] == cached["evidence"]["kind"] == "spans_only"
+
+
+def test_fresh_and_cached_parse_first_payloads_are_the_same_shape(
+    cli, document, schema_file
+):
+    # `extract -d` with nothing to reuse runs two billable jobs; the cached
+    # re-run reuses the parse it minted. Only the parse-provenance key
+    # differs — the extraction is inline on both.
+    cli.transport.respond(202, {"job_id": JOB_ID})
+    cli.transport.respond(200, completed_job())
+
+    fresh, cached = extract_twice(cli, "-d", str(document), "--schema", str(schema_file))
+
+    assert_same_shape(fresh, cached)
+    assert "parsed_first" in fresh and "reused_parse" not in fresh
+    assert "reused_parse" in cached and "parsed_first" not in cached
+
+
+def test_a_forced_re_extract_payload_is_the_same_shape_as_its_cached_re_run(
+    cli, document, schema_file
+):
+    parse_id = parse_doc(cli, document)
+    complete_extract(cli, parse_id, "--schema", str(schema_file))
+
+    forced = complete_extract(
+        cli, parse_id, "--schema", str(schema_file), "--force", job_id="extract-0002"
+    )
+    again = cli.invoke(
+        "extract", parse_id, "--schema", str(schema_file), "--json", env=AUTH_ENV
+    )
+
+    assert again.exit_code == 0
+    assert_same_shape(forced, json.loads(again.stdout))
+
+
+@pytest.mark.parametrize(
+    "mangle",
+    [
+        # A completed body that carries no result to serve: the key gone
+        # (a contract rename), or present and empty (a null result).
+        lambda result: result.pop("extraction"),
+        lambda result: result.update(extraction=None),
+    ],
+)
+def test_a_result_without_an_extraction_fails_whole_before_any_write(
+    cli, document, schema_file, mangle
+):
+    parse_id = parse_doc(cli, document)
+    drifted = extract_result()
+    mangle(drifted)
+    cli.transport.respond(202, {"job_id": "extract-0001"})
+    cli.transport.respond(200, completed_extract_job(drifted))
+
+    result = cli.invoke(
+        "extract", parse_id, "--schema", str(schema_file), "--json", env=AUTH_ENV
+    )
+
+    # Never a success whose payload has no result in it: rejected whole,
+    # named, and recoverable — the same posture as any other unreadable
+    # completion (#189).
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "unsupported_result_schema"
+    (extract_dir,) = extract_item_dirs(cli)
+    assert not (extract_dir / "extract.json").exists()
+    assert not (extract_dir / "meta.json").exists()
+    ticket = json.loads((extract_dir / "job.json").read_text())
+    assert ticket["state"] == "unreadable"
+    assert "extraction" in ticket["reason"]
+
+
 # --- partial extraction (#118): a reduced result is labeled, never silent ---
 
 VIOLATION = (
