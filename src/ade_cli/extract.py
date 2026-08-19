@@ -757,6 +757,18 @@ def extract(
             billing["service_tier"],
             meta.get("model_version") or meta.get("version"),
         )
+        if not isinstance(data["extraction"], (dict, list)):
+            # The result itself (#189): `extraction` is what the run was
+            # for, and stdout carries it whole on every path — so a
+            # completed body that carries no schema-shaped result is not a
+            # success this CLI can serve. Failing here keeps it out of the
+            # store and off stdout, instead of reporting `extraction: null`
+            # beside a billed run and a payload no consumer can read. A
+            # missing key raises KeyError into the same handler.
+            raise TypeError(
+                "extraction is "
+                f"{type(data['extraction']).__name__}, not an object or array"
+            )
         if markdown_url is not None and not isinstance(data.get("markdown"), str):
             # The URL form's markdown.md materializes from the response's
             # echo — the CLI never had a local file. A missing or non-string

@@ -835,7 +835,7 @@
           },
           {
             "key": "extraction",
-            "what": "THE RESULT: the schema-shaped object, verbatim"
+            "what": "THE RESULT: the schema-shaped object, verbatim \u2014 inline on every successful run, cached hits included"
           },
           {
             "key": "fields",

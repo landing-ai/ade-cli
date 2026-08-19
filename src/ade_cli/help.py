@@ -213,7 +213,8 @@ RESULTS: dict[str, dict] = {
             ("version", "resolved extract model version"),
             ("credits", "credits billed (0 on a cached hit)"),
             ("tier", "service tier the run was billed at"),
-            ("extraction", "THE RESULT: the schema-shaped object, verbatim"),
+            ("extraction", "THE RESULT: the schema-shaped object, verbatim — "
+             "inline on every successful run, cached hits included"),
             ("fields", "number of leaf fields"),
             ("ungroundable", "field paths whose non-empty value has no box"),
             ("empty_fields", "field paths with no value (nothing to ground)"),
