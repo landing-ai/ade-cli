@@ -657,7 +657,7 @@
           },
           {
             "key": "credits",
-            "what": "credits billed (0 on a cached hit)"
+            "what": "credits billed for the original run (unchanged on a cached hit)"
           },
           {
             "key": "tier",
@@ -827,7 +827,7 @@
           },
           {
             "key": "credits",
-            "what": "credits billed (0 on a cached hit)"
+            "what": "credits billed for the original run (unchanged on a cached hit)"
           },
           {
             "key": "tier",
